@@ -2,6 +2,16 @@
 
 Static browser app for running a live fantasy football auction draft.
 
+## Current capabilities
+
+- Sleeper import with a cleaned QB/RB/WR/TE plus team-defense draft pool.
+- Fallback overall and position ranks from available Sleeper metadata, active status, draft relevance, and trending signals.
+- Editable tiers, Target/Sleeper/Avoid labels, custom auction values, and notes.
+- My Team designation with pinned budget, max bid, roster needs, and scarcity guidance.
+- Team budget and max-bid visibility for every manager.
+- JSON export/import and localStorage autosave.
+- Local-only Ask ChatGPT prompt helper with no API key or backend.
+
 ## Run locally
 
 Open `index.html` directly, or serve the folder with any static server:

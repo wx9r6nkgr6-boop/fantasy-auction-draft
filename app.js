@@ -1,11 +1,28 @@
 "use strict";
 
-const STORAGE_KEY = "fantasyAuctionDraftState.v1";
+const STORAGE_KEY = "fantasyAuctionDraftState.v2";
+const LEGACY_STORAGE_KEY = "fantasyAuctionDraftState.v1";
 const SLEEPER_PLAYERS_URL = "https://api.sleeper.app/v1/players/nfl";
 const SLEEPER_TRENDING_URL = "https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=75";
-const ROSTER_LIMITS = { QB: 2, RB: 2, WR: 3, TE: 1, FLEX: 1, DEF: 1, Bench: 7 };
+const ROSTER_LIMITS = { QB: 2, RB: 2, WR: 3, TE: 1, FLEX: 1, DEF: 1, Bench: 7, IR: 1 };
+const REQUIRED_ROSTER_SLOTS = ["QB", "RB", "WR", "TE", "FLEX", "DEF", "Bench"];
+const REQUIRED_ROSTER_SIZE = REQUIRED_ROSTER_SLOTS.reduce((sum, slot) => sum + ROSTER_LIMITS[slot], 0);
 const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
-const DRAFT_POSITIONS = new Set(["QB", "RB", "WR", "TE", "DEF", "K"]);
+const OFFENSIVE_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
+const DRAFT_POSITIONS = new Set(["QB", "RB", "WR", "TE", "DEF"]);
+const ACTIVE_STATUSES = new Set(["Active", "Injured Reserve", "Physically Unable to Perform", "Non Football Injury", "Suspended"]);
+const CORE_LIMITS = { QB: 70, RB: 180, WR: 240, TE: 110, DEF: 32 };
+const DEEP_LIMITS = { QB: 115, RB: 330, WR: 460, TE: 220, DEF: 32 };
+const TEAM_DEFENSES = [
+  ["ARI", "Arizona Cardinals"], ["ATL", "Atlanta Falcons"], ["BAL", "Baltimore Ravens"], ["BUF", "Buffalo Bills"],
+  ["CAR", "Carolina Panthers"], ["CHI", "Chicago Bears"], ["CIN", "Cincinnati Bengals"], ["CLE", "Cleveland Browns"],
+  ["DAL", "Dallas Cowboys"], ["DEN", "Denver Broncos"], ["DET", "Detroit Lions"], ["GB", "Green Bay Packers"],
+  ["HOU", "Houston Texans"], ["IND", "Indianapolis Colts"], ["JAX", "Jacksonville Jaguars"], ["KC", "Kansas City Chiefs"],
+  ["LAC", "Los Angeles Chargers"], ["LAR", "Los Angeles Rams"], ["LV", "Las Vegas Raiders"], ["MIA", "Miami Dolphins"],
+  ["MIN", "Minnesota Vikings"], ["NE", "New England Patriots"], ["NO", "New Orleans Saints"], ["NYG", "New York Giants"],
+  ["NYJ", "New York Jets"], ["PHI", "Philadelphia Eagles"], ["PIT", "Pittsburgh Steelers"], ["SEA", "Seattle Seahawks"],
+  ["SF", "San Francisco 49ers"], ["TB", "Tampa Bay Buccaneers"], ["TEN", "Tennessee Titans"], ["WAS", "Washington Commanders"]
+];
 
 const state = {
   players: {},
@@ -14,6 +31,7 @@ const state = {
   drafted: [],
   teams: defaultTeams(),
   trending: {},
+  settings: defaultSettings(),
   selectedPlayerId: null,
   lastSleeperRefresh: null,
   history: []
@@ -30,22 +48,26 @@ document.addEventListener("DOMContentLoaded", init);
 function init() {
   bindElements();
   loadState();
+  ensureSettings();
   bindEvents();
-  renderAll();
   if (!state.playerOrder.length) {
     seedPlayers();
-    showMessage("Loaded starter sample players. Use Refresh Sleeper for the full player pool.");
+    showMessage("Loaded starter sample players. Use Refresh Sleeper for the cleaned draft pool.");
+  } else {
+    rerankPlayers();
   }
+  renderAll();
 }
 
 function bindElements() {
   [
-    "importSleeperBtn", "importTrendingBtn", "exportBtn", "importFile", "playerCount",
-    "availableCount", "draftedCount", "autosaveStatus", "selectedName", "selectedMeta",
-    "selectedFlags", "draftTeam", "draftPrice", "draftBtn", "undoBtn", "favoriteToggle",
-    "watchToggle", "tierInput", "customValueInput", "dndToggle", "notesInput", "searchInput",
-    "positionFilter", "viewFilter", "clearFiltersBtn", "messages", "playerList", "addTeamBtn",
-    "teamsList"
+    "importSleeperBtn", "importTrendingBtn", "exportBtn", "importFile", "playerCount", "availableCount",
+    "draftedCount", "autosaveStatus", "myTeamSelect", "myTeamSummary", "selectedName", "selectedMeta",
+    "selectedFlags", "selectedScarcity", "draftTeam", "draftBudgetHint", "draftPrice", "draftBtn", "undoBtn",
+    "targetToggle", "sleeperToggle", "avoidToggle", "tierInput", "customValueInput", "notesInput",
+    "copyResearchPromptBtn", "copyBidPromptBtn", "copyNominationPromptBtn", "promptOutput", "searchInput",
+    "positionFilter", "tierFilter", "labelFilter", "sortFilter", "showDeepPoolToggle", "clearFiltersBtn",
+    "messages", "playerList", "addTeamBtn", "leagueBudgetInput", "teamsList"
   ].forEach((id) => {
     ui[id] = document.getElementById(id);
   });
@@ -61,22 +83,61 @@ function bindEvents() {
   ui.undoBtn.addEventListener("click", undoLastDraft);
   ui.addTeamBtn.addEventListener("click", addTeam);
   ui.clearFiltersBtn.addEventListener("click", clearFilters);
+  ui.draftTeam.addEventListener("change", () => {
+    renderDraftBudgetHint();
+    scheduleSave();
+  });
+  ui.draftPrice.addEventListener("input", renderDraftBudgetHint);
+  ui.myTeamSelect.addEventListener("change", () => {
+    state.settings.myTeamId = ui.myTeamSelect.value;
+    renderAll();
+    scheduleSave();
+  });
+  ui.leagueBudgetInput.addEventListener("input", () => {
+    state.settings.budget = Math.max(1, Number(ui.leagueBudgetInput.value || 200));
+    renderAll();
+    scheduleSave();
+  });
+  ui.showDeepPoolToggle.addEventListener("change", () => {
+    state.settings.showDeepPool = ui.showDeepPoolToggle.checked;
+    invalidateFilters();
+    renderPlayers();
+    renderStatus();
+    scheduleSave();
+  });
 
-  ["searchInput", "positionFilter", "viewFilter"].forEach((id) => {
+  ["searchInput", "positionFilter", "tierFilter", "labelFilter", "sortFilter"].forEach((id) => {
     ui[id].addEventListener("input", scheduleFilterRender);
     ui[id].addEventListener("change", scheduleFilterRender);
   });
 
-  ["favoriteToggle", "watchToggle", "tierInput", "customValueInput", "dndToggle", "notesInput"].forEach((id) => {
+  ["targetToggle", "sleeperToggle", "avoidToggle"].forEach((id) => {
+    ui[id].addEventListener("click", () => setSelectedLabel(ui[id].dataset.label));
+  });
+
+  ["tierInput", "customValueInput", "notesInput"].forEach((id) => {
     ui[id].addEventListener("input", updateSelectedPrep);
     ui[id].addEventListener("change", updateSelectedPrep);
   });
+
+  ui.copyResearchPromptBtn.addEventListener("click", () => copyPrompt("research"));
+  ui.copyBidPromptBtn.addEventListener("click", () => copyPrompt("bid"));
+  ui.copyNominationPromptBtn.addEventListener("click", () => copyPrompt("nomination"));
+}
+
+function defaultSettings() {
+  return {
+    myTeamId: "",
+    budget: 200,
+    showDeepPool: false
+  };
 }
 
 function defaultTeams() {
-  return Array.from({ length: 10 }, (_, index) => ({
+  const names = ["Kyle", "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Sam", "Drew", "Jamie"];
+  return names.map((name, index) => ({
     id: cryptoSafeId(`team-${index + 1}`),
-    name: `Team ${index + 1}`
+    name
   }));
 }
 
@@ -89,12 +150,19 @@ function cryptoSafeId(fallback) {
 
 function loadState() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!saved) return;
     mergeImportedState(JSON.parse(saved), { silent: true });
     ui.autosaveStatus.textContent = "Restored";
   } catch (error) {
     showMessage(`Autosave restore failed: ${error.message}`, true);
+  }
+}
+
+function ensureSettings() {
+  state.settings = { ...defaultSettings(), ...state.settings };
+  if (!state.settings.myTeamId || !state.teams.some((team) => team.id === state.settings.myTeamId)) {
+    state.settings.myTeamId = state.teams[0]?.id || "";
   }
 }
 
@@ -109,12 +177,12 @@ function scheduleSave() {
       ui.autosaveStatus.textContent = "Save failed";
       showMessage(`Autosave failed: ${error.message}`, true);
     }
-  }, 180);
+  }, 160);
 }
 
 function createExportPayload() {
   return {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     players: state.players,
     playerOrder: state.playerOrder,
@@ -122,26 +190,30 @@ function createExportPayload() {
     drafted: state.drafted,
     teams: state.teams,
     trending: state.trending,
+    settings: state.settings,
     lastSleeperRefresh: state.lastSleeperRefresh
   };
 }
 
 function mergeImportedState(payload, options = {}) {
   if (!payload || typeof payload !== "object") throw new Error("Invalid JSON state file.");
+  state.settings = { ...defaultSettings(), ...(payload.settings || {}) };
+  state.teams = normalizeTeams(payload.teams || defaultTeams());
+  ensureSettings();
+  state.prep = normalizePrep(payload.prep || {});
+  state.trending = payload.trending && typeof payload.trending === "object" ? payload.trending : {};
   state.players = normalizePlayers(payload.players || {});
   state.playerOrder = Array.isArray(payload.playerOrder) ? payload.playerOrder.filter((id) => state.players[id]) : Object.keys(state.players);
-  state.prep = normalizePrep(payload.prep || {});
   state.drafted = Array.isArray(payload.drafted) ? payload.drafted.filter((pick) => pick && state.players[pick.playerId]) : [];
-  state.teams = normalizeTeams(payload.teams || defaultTeams());
-  state.trending = payload.trending && typeof payload.trending === "object" ? payload.trending : {};
   state.lastSleeperRefresh = payload.lastSleeperRefresh || null;
   state.selectedPlayerId = state.playerOrder[0] || null;
   state.history = [];
+  rerankPlayers();
   invalidateFilters();
   if (!options.silent) {
     renderAll();
     scheduleSave();
-    showMessage("Imported draft state, teams, player prep, and roster history.");
+    showMessage("Imported draft state, My Team, labels, tiers, teams, budgets, and roster history.");
   }
 }
 
@@ -151,6 +223,7 @@ function normalizePlayers(players) {
     const clean = normalizePlayer(player);
     if (clean) normalized[clean.id] = clean;
   });
+  ensureTeamDefenses(normalized);
   return normalized;
 }
 
@@ -158,19 +231,32 @@ function normalizePlayer(raw) {
   if (!raw) return null;
   const position = normalizePosition(raw.position || raw.fantasy_positions?.[0]);
   if (!position || !DRAFT_POSITIONS.has(position)) return null;
+  if (position !== "DEF" && !OFFENSIVE_POSITIONS.has(position)) return null;
   const first = raw.first_name || "";
   const last = raw.last_name || "";
   const fullName = raw.full_name || raw.name || `${first} ${last}`.trim();
   if (!fullName) return null;
   const id = String(raw.id || raw.player_id || raw.sleeper_id || fullName);
-  const team = raw.team || raw.team_abbr || (position === "DEF" ? id.toUpperCase() : "FA");
+  const team = raw.team || raw.team_abbr || (position === "DEF" ? defenseTeamFromId(id) : "FA");
+  const status = raw.status || (raw.active ? "Active" : "") || (position === "DEF" ? "Active" : "");
+  const searchRank = numberOrFallback(raw.search_rank ?? raw.searchRank, 9999);
   const clean = {
     id,
-    name: fullName,
+    name: position === "DEF" && !fullName.includes("DEF") ? `${fullName} DEF` : fullName,
     position,
-    team,
+    team: team || "FA",
     age: raw.age || "",
-    status: raw.status || "",
+    status,
+    searchRank,
+    yearsExp: numberOrFallback(raw.years_exp ?? raw.yearsExp, 0),
+    depthChartOrder: numberOrFallback(raw.depth_chart_order ?? raw.depthChartOrder, 99),
+    active: position === "DEF" || Boolean(raw.active) || ACTIVE_STATUSES.has(status),
+    core: Boolean(raw.core),
+    autoTier: String(raw.autoTier || ""),
+    overallRank: Number(raw.overallRank || 9999),
+    positionRank: Number(raw.positionRank || 9999),
+    positionRankLabel: raw.positionRankLabel || "",
+    heuristicScore: Number(raw.heuristicScore || 9999),
     searchText: ""
   };
   clean.searchText = buildSearchText(clean, state.prep[id]);
@@ -187,29 +273,32 @@ function normalizePosition(position) {
 function normalizePrep(prep) {
   const normalized = {};
   Object.entries(prep).forEach(([id, value]) => {
+    const legacyLabel = value.doNotDraft ? "avoid" : "";
     normalized[id] = {
-      favorite: Boolean(value.favorite),
-      watch: Boolean(value.watch),
+      label: normalizeLabel(value.label || legacyLabel),
       notes: String(value.notes || ""),
       tier: String(value.tier || ""),
-      customValue: value.customValue === "" || value.customValue == null ? "" : Number(value.customValue),
-      doNotDraft: Boolean(value.doNotDraft)
+      customValue: value.customValue === "" || value.customValue == null ? "" : Number(value.customValue)
     };
   });
   return normalized;
+}
+
+function normalizeLabel(label) {
+  return ["target", "sleeper", "avoid"].includes(label) ? label : "";
 }
 
 function normalizeTeams(teams) {
   if (!Array.isArray(teams) || !teams.length) return defaultTeams();
   return teams.map((team, index) => ({
     id: String(team.id || cryptoSafeId(`team-${index + 1}`)),
-    name: String(team.name || `Team ${index + 1}`)
+    name: String(team.name || `Manager ${index + 1}`)
   }));
 }
 
 async function refreshSleeperPlayers() {
   ui.importSleeperBtn.disabled = true;
-  showMessage("Refreshing Sleeper players...");
+  showMessage("Refreshing Sleeper players and rebuilding the cleaned draft pool...");
   try {
     const data = await fetchJsonWithTimeout(SLEEPER_PLAYERS_URL, 20000);
     const existingPrep = state.prep;
@@ -217,19 +306,19 @@ async function refreshSleeperPlayers() {
     Object.entries(data).forEach(([id, raw]) => {
       const player = normalizePlayer({ ...raw, id });
       if (!player) return;
+      if (!isDraftRelevant(player, false) && !isDraftRelevant(player, true)) return;
       players[player.id] = player;
     });
+    ensureTeamDefenses(players);
     state.players = players;
-    state.playerOrder = Object.values(players)
-      .sort(playerSort)
-      .map((player) => player.id);
     state.prep = existingPrep;
-    rebuildPlayerSearchText();
+    rerankPlayers();
     state.lastSleeperRefresh = new Date().toISOString();
     invalidateFilters();
     renderAll();
     scheduleSave();
-    showMessage(`Sleeper import complete: ${state.playerOrder.length.toLocaleString()} draftable players. Prep fields were preserved.`);
+    const coreCount = Object.values(state.players).filter((player) => player.core).length;
+    showMessage(`Sleeper import complete: ${coreCount.toLocaleString()} core players, ${state.playerOrder.length.toLocaleString()} total cleaned players with deep pool on.`);
   } catch (error) {
     showMessage(`Sleeper import failed: ${error.message}. Existing cached players remain available.`, true);
   } finally {
@@ -246,10 +335,11 @@ async function refreshTrendingPlayers() {
     data.forEach((item, index) => {
       state.trending[String(item.player_id)] = { count: item.count || 0, rank: index + 1 };
     });
+    rerankPlayers();
     invalidateFilters();
     renderAll();
     scheduleSave();
-    showMessage(`Trending import complete: ${data.length} players marked.`);
+    showMessage(`Trending import complete: ${data.length} players marked and fallback ranks refreshed.`);
   } catch (error) {
     showMessage(`Trending import failed: ${error.message}.`, true);
   } finally {
@@ -271,35 +361,112 @@ async function fetchJsonWithTimeout(url, timeoutMs) {
 
 function seedPlayers() {
   const sample = [
-    ["sample-mahomes", "Patrick Mahomes", "QB", "KC"],
-    ["sample-jefferson", "Justin Jefferson", "WR", "MIN"],
-    ["sample-bijan", "Bijan Robinson", "RB", "ATL"],
-    ["sample-kelce", "Travis Kelce", "TE", "KC"],
-    ["sample-ravens", "Baltimore Ravens", "DEF", "BAL"],
-    ["sample-allen", "Josh Allen", "QB", "BUF"],
-    ["sample-chase", "Ja'Marr Chase", "WR", "CIN"],
-    ["sample-gibbs", "Jahmyr Gibbs", "RB", "DET"]
+    ["sample-mahomes", "Patrick Mahomes", "QB", "KC", 1],
+    ["sample-allen", "Josh Allen", "QB", "BUF", 2],
+    ["sample-bijan", "Bijan Robinson", "RB", "ATL", 3],
+    ["sample-jefferson", "Justin Jefferson", "WR", "MIN", 4],
+    ["sample-chase", "Ja'Marr Chase", "WR", "CIN", 5],
+    ["sample-gibbs", "Jahmyr Gibbs", "RB", "DET", 6],
+    ["sample-kelce", "Travis Kelce", "TE", "KC", 7],
+    ["sample-ravens", "Baltimore Ravens DEF", "DEF", "BAL", 8]
   ];
   state.players = {};
-  sample.forEach(([id, name, position, team]) => {
-    state.players[id] = { id, name, position, team, age: "", status: "", searchText: "" };
+  sample.forEach(([id, name, position, team, searchRank]) => {
+    state.players[id] = normalizePlayer({ id, name, position, team, status: "Active", search_rank: searchRank, core: true });
   });
-  state.playerOrder = sample.map(([id]) => id);
-  rebuildPlayerSearchText();
+  ensureTeamDefenses(state.players);
+  rerankPlayers();
   invalidateFilters();
-  renderAll();
   scheduleSave();
 }
 
-function playerSort(a, b) {
-  const posWeight = { QB: 1, RB: 2, WR: 3, TE: 4, DEF: 5, K: 6 };
-  return (posWeight[a.position] || 9) - (posWeight[b.position] || 9) || a.name.localeCompare(b.name);
+function ensureTeamDefenses(players) {
+  const existingTeams = new Set(Object.values(players).filter((player) => player.position === "DEF").map((player) => player.team));
+  TEAM_DEFENSES.forEach(([abbr, name], index) => {
+    if (existingTeams.has(abbr)) return;
+    const id = `def-${abbr.toLowerCase()}`;
+    players[id] = normalizePlayer({
+      id,
+      name: `${name} DEF`,
+      position: "DEF",
+      team: abbr,
+      status: "Active",
+      search_rank: 600 + index,
+      core: true
+    });
+  });
 }
 
-function rebuildPlayerSearchText() {
-  Object.values(state.players).forEach((player) => {
-    player.searchText = buildSearchText(player, state.prep[player.id]);
+function defenseTeamFromId(id) {
+  const upper = String(id || "").toUpperCase();
+  return TEAM_DEFENSES.some(([abbr]) => abbr === upper) ? upper : "DEF";
+}
+
+function isDraftRelevant(player, deep) {
+  if (player.position === "DEF") return true;
+  if (!OFFENSIVE_POSITIONS.has(player.position)) return false;
+  if (!player.active) return false;
+  if (!deep && (!player.team || player.team === "FA")) return false;
+  const limit = deep ? DEEP_LIMITS[player.position] : CORE_LIMITS[player.position];
+  const looseSearchCap = deep ? 9999 : 7500;
+  return player.searchRank <= looseSearchCap || player.depthChartOrder <= 4 || player.yearsExp <= 2 || limit > 0;
+}
+
+function rerankPlayers() {
+  const players = Object.values(state.players).filter(Boolean);
+  players.forEach((player) => {
+    player.heuristicScore = fallbackScore(player);
   });
+  const byPosition = {};
+  DRAFT_POSITIONS.forEach((position) => {
+    byPosition[position] = players
+      .filter((player) => player.position === position)
+      .sort((a, b) => a.heuristicScore - b.heuristicScore || a.name.localeCompare(b.name));
+    byPosition[position].forEach((player, index) => {
+      player.positionRank = index + 1;
+      player.positionRankLabel = `${player.position}${index + 1}`;
+      player.autoTier = String(autoTierFor(player.position, index + 1));
+      player.core = player.positionRank <= CORE_LIMITS[player.position] && player.active && (player.position === "DEF" || player.team !== "FA");
+      player.searchText = buildSearchText(player, state.prep[player.id]);
+    });
+  });
+  state.playerOrder = players
+    .filter((player) => player.positionRank <= DEEP_LIMITS[player.position])
+    .sort((a, b) => a.heuristicScore - b.heuristicScore || a.name.localeCompare(b.name))
+    .map((player, index) => {
+      player.overallRank = index + 1;
+      player.searchText = buildSearchText(player, state.prep[player.id]);
+      return player.id;
+    });
+  syncTierFilterOptions();
+}
+
+function fallbackScore(player) {
+  const positionOffset = { RB: 0, WR: 8, QB: 18, TE: 28, DEF: 45 }[player.position] || 80;
+  const searchComponent = Math.min(player.searchRank, 9999) / 80;
+  const depthComponent = Math.min(player.depthChartOrder, 99) * 2.2;
+  const agePenalty = player.age && (player.age < 21 || player.age > 32) ? 8 : 0;
+  const freeAgentPenalty = player.team === "FA" ? 45 : 0;
+  const inactivePenalty = player.active ? 0 : 100;
+  const trendingBoost = state.trending[player.id] ? Math.max(0, 18 - state.trending[player.id].rank / 6) : 0;
+  return positionOffset + searchComponent + depthComponent + agePenalty + freeAgentPenalty + inactivePenalty - trendingBoost;
+}
+
+function autoTierFor(position, rank) {
+  const bands = {
+    QB: [6, 14, 24, 36, 55],
+    RB: [12, 24, 42, 70, 110],
+    WR: [12, 24, 42, 72, 120],
+    TE: [6, 12, 22, 38, 70],
+    DEF: [5, 10, 16, 24, 32]
+  }[position] || [12, 24, 48, 96];
+  const tier = bands.findIndex((maxRank) => rank <= maxRank);
+  return tier === -1 ? bands.length + 1 : tier + 1;
+}
+
+function numberOrFallback(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function buildSearchText(player, prep) {
@@ -307,36 +474,110 @@ function buildSearchText(player, prep) {
     player.name,
     player.position,
     player.team,
+    player.positionRankLabel,
+    `tier ${effectiveTier(player, prep)}`,
+    prep?.label,
     prep?.notes,
-    prep?.tier,
     prep?.customValue
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function renderAll() {
+  syncControlValues();
   renderStatus();
   renderDraftControls();
+  renderMyTeamSummary();
   renderSelectedPlayer();
   renderPlayers();
   renderTeams();
+  renderPrompt();
+}
+
+function syncControlValues() {
+  ui.showDeepPoolToggle.checked = Boolean(state.settings.showDeepPool);
+  ui.leagueBudgetInput.value = state.settings.budget;
+  syncTierFilterOptions();
+}
+
+function syncTierFilterOptions() {
+  if (!ui.tierFilter) return;
+  const current = ui.tierFilter.value || "ALL";
+  const tiers = Array.from(new Set(Object.values(state.players).map((player) => effectiveTier(player, getPrep(player.id))).filter(Boolean))).sort(tierSort);
+  ui.tierFilter.innerHTML = '<option value="ALL">All</option>';
+  tiers.forEach((tier) => {
+    const option = document.createElement("option");
+    option.value = tier;
+    option.textContent = `Tier ${tier}`;
+    ui.tierFilter.appendChild(option);
+  });
+  ui.tierFilter.value = tiers.includes(current) ? current : "ALL";
+}
+
+function tierSort(a, b) {
+  return Number(a) - Number(b) || String(a).localeCompare(String(b));
 }
 
 function renderStatus() {
   const draftedIds = draftedIdSet();
-  ui.playerCount.textContent = state.playerOrder.length.toLocaleString();
-  ui.availableCount.textContent = String(state.playerOrder.length - draftedIds.size);
+  const poolCount = state.playerOrder.map((id) => state.players[id]).filter((player) => player && (state.settings.showDeepPool || player.core)).length;
+  const availableCount = state.playerOrder.map((id) => state.players[id]).filter((player) => player && (state.settings.showDeepPool || player.core) && !draftedIds.has(player.id)).length;
+  ui.playerCount.textContent = poolCount.toLocaleString();
+  ui.availableCount.textContent = availableCount.toLocaleString();
   ui.draftedCount.textContent = String(draftedIds.size);
 }
 
 function renderDraftControls() {
+  const previousDraftTeam = ui.draftTeam.value || state.settings.myTeamId;
   ui.draftTeam.innerHTML = "";
+  ui.myTeamSelect.innerHTML = "";
   state.teams.forEach((team) => {
-    const option = document.createElement("option");
-    option.value = team.id;
-    option.textContent = team.name;
-    ui.draftTeam.appendChild(option);
+    const draftOption = document.createElement("option");
+    draftOption.value = team.id;
+    draftOption.textContent = team.id === state.settings.myTeamId ? `${team.name} (My Team)` : team.name;
+    ui.draftTeam.appendChild(draftOption);
+    const myOption = document.createElement("option");
+    myOption.value = team.id;
+    myOption.textContent = team.name;
+    ui.myTeamSelect.appendChild(myOption);
   });
+  if (state.settings.myTeamId) ui.myTeamSelect.value = state.settings.myTeamId;
+  ui.draftTeam.value = state.teams.some((team) => team.id === previousDraftTeam) ? previousDraftTeam : state.settings.myTeamId;
   ui.undoBtn.disabled = state.drafted.length === 0;
+  renderDraftBudgetHint();
+}
+
+function renderDraftBudgetHint() {
+  const team = teamInfoMap()[ui.draftTeam.value];
+  const player = state.players[state.selectedPlayerId];
+  const price = Number(ui.draftPrice.value || 0);
+  if (!team) {
+    ui.draftBudgetHint.textContent = "";
+    return;
+  }
+  const afterBudget = team.budgetRemaining - price;
+  const afterOpenSlots = player ? Math.max(0, team.remainingRequired - 1) : team.remainingRequired;
+  const legal = !player || price <= team.maxBid;
+  ui.draftBudgetHint.innerHTML = `Budget $${team.budgetRemaining} - Max bid $${team.maxBid} - After bid $${afterBudget} with ${afterOpenSlots} required slots left`;
+  ui.draftBudgetHint.classList.toggle("bad", !legal);
+}
+
+function renderMyTeamSummary() {
+  const info = teamInfoMap()[state.settings.myTeamId];
+  if (!info) {
+    ui.myTeamSummary.textContent = "Choose a manager to pin My Team.";
+    return;
+  }
+  const needs = rosterNeedText(info.roster).join(", ");
+  const warnings = scarcityWarnings().slice(0, 4);
+  ui.myTeamSummary.innerHTML = `
+    <div class="budget-grid">
+      <div><span>Budget</span><strong>$${info.budgetRemaining}</strong></div>
+      <div><span>Max bid</span><strong>$${info.maxBid}</strong></div>
+      <div><span>Open slots</span><strong>${info.remainingRequired}</strong></div>
+    </div>
+    <p class="needs-line">${escapeHtml(needs || "Roster requirements are filled.")}</p>
+    <div class="urgency-list">${warnings.map((warning) => `<div class="urgency ${warning.level}">${escapeHtml(warning.text)}</div>`).join("")}</div>
+  `;
 }
 
 function renderSelectedPlayer() {
@@ -347,24 +588,29 @@ function renderSelectedPlayer() {
   setPrepDisabled(!player);
   if (!player) {
     ui.selectedName.textContent = "No player selected";
-    ui.selectedMeta.textContent = "Pick a player to draft or edit prep notes.";
+    ui.selectedMeta.textContent = "Pick a player to draft, label, or research.";
     ui.selectedFlags.innerHTML = "";
+    ui.selectedScarcity.innerHTML = "";
+    renderPrompt();
     return;
   }
   ui.selectedName.textContent = player.name;
-  ui.selectedMeta.textContent = `${player.position} • ${player.team}${drafted ? ` • Drafted by ${teamName(drafted.teamId)} for $${drafted.price}` : ""}`;
-  ui.favoriteToggle.checked = prep.favorite;
-  ui.watchToggle.checked = prep.watch;
-  ui.tierInput.value = prep.tier;
+  ui.selectedMeta.textContent = `#${player.overallRank} - ${player.positionRankLabel} - ${player.position} - ${player.team}${drafted ? ` - Drafted by ${teamName(drafted.teamId)} for $${drafted.price}` : ""}`;
+  ui.tierInput.value = effectiveTier(player, prep);
   ui.customValueInput.value = prep.customValue;
-  ui.dndToggle.checked = prep.doNotDraft;
   ui.notesInput.value = prep.notes;
+  ["target", "sleeper", "avoid"].forEach((label) => {
+    ui[`${label}Toggle`].classList.toggle("active", prep.label === label);
+  });
   ui.selectedFlags.innerHTML = "";
   badgeList(player, prep, drafted).forEach((badge) => ui.selectedFlags.appendChild(badge));
+  ui.selectedScarcity.innerHTML = selectedScarcityHtml(player);
+  renderDraftBudgetHint();
+  renderPrompt();
 }
 
 function setPrepDisabled(disabled) {
-  ["favoriteToggle", "watchToggle", "tierInput", "customValueInput", "dndToggle", "notesInput"].forEach((id) => {
+  ["targetToggle", "sleeperToggle", "avoidToggle", "tierInput", "customValueInput", "notesInput"].forEach((id) => {
     ui[id].disabled = disabled;
   });
 }
@@ -378,23 +624,19 @@ function renderPlayers() {
     card.dataset.playerId = player.id;
     card.classList.toggle("selected", player.id === state.selectedPlayerId);
     card.classList.toggle("drafted", Boolean(drafted));
-    card.classList.toggle("do-not-draft", prep.doNotDraft);
+    card.classList.toggle("avoid", prep.label === "avoid");
+    card.querySelector(".overall-rank").textContent = `#${player.overallRank}`;
+    card.querySelector(".position-rank").textContent = player.positionRankLabel;
     card.querySelector("h3").textContent = player.name;
-    card.querySelector(".player-meta").textContent = `${player.position} • ${player.team}${drafted ? ` • ${teamName(drafted.teamId)} $${drafted.price}` : ""}`;
-    card.querySelector(".player-notes").textContent = prep.notes || "";
-    const favoriteBtn = card.querySelector(".favorite-btn");
-    const watchBtn = card.querySelector(".watch-btn");
-    favoriteBtn.textContent = prep.favorite ? "★" : "☆";
-    watchBtn.textContent = prep.watch ? "●" : "○";
-    favoriteBtn.classList.toggle("active", prep.favorite);
-    watchBtn.classList.toggle("active", prep.watch);
-    favoriteBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      togglePrep(player.id, "favorite");
-    });
-    watchBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      togglePrep(player.id, "watch");
+    card.querySelector(".player-meta").textContent = `${player.position} - ${player.team} - Tier ${effectiveTier(player, prep)}${drafted ? ` - ${teamName(drafted.teamId)} $${drafted.price}` : ""}`;
+    card.querySelector(".player-notes").textContent = prep.notes || scarcityShortText(player);
+    card.querySelectorAll(".label-toggle").forEach((button) => {
+      const label = button.dataset.label;
+      button.classList.toggle("active", prep.label === label);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPlayerLabel(player.id, label);
+      });
     });
     const badgeWrap = card.querySelector(".player-badges");
     badgeList(player, prep, drafted).forEach((badge) => badgeWrap.appendChild(badge));
@@ -402,7 +644,6 @@ function renderPlayers() {
     fragment.appendChild(card);
   });
   ui.playerList.replaceChildren(fragment);
-  ui.messages.dataset.count = String(filteredCache.length);
   if (!ui.messages.textContent || ui.messages.dataset.auto === "true") {
     showMessage(`${filteredCache.length.toLocaleString()} players shown.`, false, true);
   }
@@ -410,11 +651,12 @@ function renderPlayers() {
 
 function badgeList(player, prep, drafted) {
   const badges = [];
-  badges.push(makeBadge(player.position));
-  if (prep.tier) badges.push(makeBadge(`Tier ${prep.tier}`, "good"));
+  badges.push(makeBadge(player.positionRankLabel));
+  badges.push(makeBadge(`Tier ${effectiveTier(player, prep)}`, "good"));
+  if (prep.label) badges.push(makeBadge(labelName(prep.label), prep.label === "avoid" ? "bad" : "good"));
   if (prep.customValue !== "") badges.push(makeBadge(`$${prep.customValue}`, "good"));
   if (state.trending[player.id]) badges.push(makeBadge(`Trending #${state.trending[player.id].rank}`, "warn"));
-  if (prep.doNotDraft) badges.push(makeBadge("DND", "bad"));
+  if (!player.core) badges.push(makeBadge("Deep", "muted"));
   if (drafted) badges.push(makeBadge("Drafted", "bad"));
   return badges;
 }
@@ -429,28 +671,47 @@ function makeBadge(text, kind) {
 function getFilteredPlayers() {
   const query = ui.searchInput.value.trim().toLowerCase();
   const position = ui.positionFilter.value;
-  const view = ui.viewFilter.value;
+  const tier = ui.tierFilter.value;
+  const label = ui.labelFilter.value;
+  const sort = ui.sortFilter.value;
   const draftKey = state.drafted.map((pick) => pick.playerId).join(",");
-  const prepKey = Object.entries(state.prep).map(([id, prep]) => `${id}:${Number(prep.favorite)}${Number(prep.watch)}${Number(prep.doNotDraft)}:${prep.tier}:${prep.notes}:${prep.customValue}`).join("|");
+  const prepKey = Object.entries(state.prep).map(([id, prep]) => `${id}:${prep.label}:${prep.tier}:${prep.notes}:${prep.customValue}`).join("|");
   const trendKey = Object.keys(state.trending).join(",");
-  const key = `${query}|${position}|${view}|${draftKey}|${prepKey}|${trendKey}|${state.playerOrder.length}`;
+  const key = `${query}|${position}|${tier}|${label}|${sort}|${state.settings.showDeepPool}|${draftKey}|${prepKey}|${trendKey}|${state.playerOrder.length}`;
   if (key === filteredCacheKey) return filteredCache;
   const drafted = draftedIdSet();
+  const availableOnly = sort === "available";
   filteredCache = state.playerOrder.map((id) => state.players[id]).filter((player) => {
     if (!player) return false;
     const prep = getPrep(player.id);
+    if (!state.settings.showDeepPool && !player.core) return false;
     if (position !== "ALL" && player.position !== position) return false;
+    if (tier !== "ALL" && effectiveTier(player, prep) !== tier) return false;
+    if (label !== "ALL" && label !== "unlabeled" && prep.label !== label) return false;
+    if (label === "unlabeled" && prep.label) return false;
+    if (availableOnly && drafted.has(player.id)) return false;
     if (query && !player.searchText.includes(query)) return false;
-    if (view === "available" && drafted.has(player.id)) return false;
-    if (view === "drafted" && !drafted.has(player.id)) return false;
-    if (view === "watch" && !prep.watch) return false;
-    if (view === "favorites" && !prep.favorite) return false;
-    if (view === "dnd" && !prep.doNotDraft) return false;
-    if (view === "trending" && !state.trending[player.id]) return false;
     return true;
-  }).slice(0, 350);
+  }).sort((a, b) => comparePlayers(a, b, sort, drafted)).slice(0, 350);
   filteredCacheKey = key;
   return filteredCache;
+}
+
+function comparePlayers(a, b, sort, drafted) {
+  if (drafted.has(a.id) !== drafted.has(b.id)) return drafted.has(a.id) ? 1 : -1;
+  if (sort === "position") return a.position.localeCompare(b.position) || a.positionRank - b.positionRank;
+  if (sort === "tier") return Number(effectiveTier(a, getPrep(a.id))) - Number(effectiveTier(b, getPrep(b.id))) || a.overallRank - b.overallRank;
+  if (sort === "label") return labelWeight(getPrep(a.id).label) - labelWeight(getPrep(b.id).label) || a.overallRank - b.overallRank;
+  if (sort === "trending") return trendingWeight(a.id) - trendingWeight(b.id) || a.overallRank - b.overallRank;
+  return a.overallRank - b.overallRank;
+}
+
+function labelWeight(label) {
+  return { target: 0, sleeper: 1, avoid: 3, "": 2 }[label || ""] ?? 2;
+}
+
+function trendingWeight(playerId) {
+  return state.trending[playerId] ? state.trending[playerId].rank : 9999;
 }
 
 function scheduleFilterRender() {
@@ -458,7 +719,8 @@ function scheduleFilterRender() {
   filterTimer = window.setTimeout(() => {
     invalidateFilters();
     renderPlayers();
-  }, 60);
+    renderStatus();
+  }, 50);
 }
 
 function invalidateFilters() {
@@ -473,23 +735,28 @@ function selectPlayer(playerId) {
 
 function updateSelectedPrep() {
   if (!state.selectedPlayerId) return;
+  const player = state.players[state.selectedPlayerId];
   const prep = getPrep(state.selectedPlayerId);
-  prep.favorite = ui.favoriteToggle.checked;
-  prep.watch = ui.watchToggle.checked;
   prep.tier = ui.tierInput.value.trim();
   prep.customValue = ui.customValueInput.value === "" ? "" : Number(ui.customValueInput.value);
-  prep.doNotDraft = ui.dndToggle.checked;
   prep.notes = ui.notesInput.value;
-  state.players[state.selectedPlayerId].searchText = buildSearchText(state.players[state.selectedPlayerId], prep);
+  player.searchText = buildSearchText(player, prep);
   invalidateFilters();
+  syncTierFilterOptions();
   renderSelectedPlayer();
   renderPlayers();
+  renderMyTeamSummary();
   scheduleSave();
 }
 
-function togglePrep(playerId, field) {
+function setSelectedLabel(label) {
+  if (!state.selectedPlayerId) return;
+  setPlayerLabel(state.selectedPlayerId, label);
+}
+
+function setPlayerLabel(playerId, label) {
   const prep = getPrep(playerId);
-  prep[field] = !prep[field];
+  prep.label = prep.label === label ? "" : label;
   state.players[playerId].searchText = buildSearchText(state.players[playerId], prep);
   invalidateFilters();
   renderSelectedPlayer();
@@ -498,20 +765,31 @@ function togglePrep(playerId, field) {
 }
 
 function getPrep(playerId) {
-  if (!playerId) return { favorite: false, watch: false, notes: "", tier: "", customValue: "", doNotDraft: false };
+  if (!playerId) return { label: "", notes: "", tier: "", customValue: "" };
   if (!state.prep[playerId]) {
-    state.prep[playerId] = { favorite: false, watch: false, notes: "", tier: "", customValue: "", doNotDraft: false };
+    state.prep[playerId] = { label: "", notes: "", tier: "", customValue: "" };
   }
+  state.prep[playerId].label = normalizeLabel(state.prep[playerId].label);
   return state.prep[playerId];
+}
+
+function effectiveTier(player, prep) {
+  return String(prep?.tier || player?.autoTier || "");
 }
 
 function draftSelectedPlayer() {
   const player = state.players[state.selectedPlayerId];
   if (!player || findDraftPick(player.id)) return;
+  const team = teamInfoMap()[ui.draftTeam.value];
+  const price = Number(ui.draftPrice.value || 0);
+  if (team && price > team.maxBid) {
+    showMessage(`${team.name} cannot bid $${price}; max bid is $${team.maxBid}.`, true);
+    return;
+  }
   const pick = {
     playerId: player.id,
     teamId: ui.draftTeam.value,
-    price: Number(ui.draftPrice.value || 0),
+    price,
     draftedAt: new Date().toISOString()
   };
   state.drafted.push(pick);
@@ -536,25 +814,37 @@ function draftedIdSet() {
   return new Set(state.drafted.map((pick) => pick.playerId));
 }
 
+function availablePlayers() {
+  const drafted = draftedIdSet();
+  return state.playerOrder.map((id) => state.players[id]).filter((player) => player && !drafted.has(player.id) && (state.settings.showDeepPool || player.core));
+}
+
 function findDraftPick(playerId) {
   return state.drafted.find((pick) => pick.playerId === playerId);
 }
 
 function renderTeams() {
-  const rosters = buildTeamRosters();
+  const infos = teamInfoMap();
   const fragment = document.createDocumentFragment();
-  state.teams.forEach((team, index) => {
+  const orderedTeams = [...state.teams].sort((a, b) => {
+    if (a.id === state.settings.myTeamId) return -1;
+    if (b.id === state.settings.myTeamId) return 1;
+    return 0;
+  });
+  orderedTeams.forEach((team, index) => {
+    const info = infos[team.id];
     const card = document.createElement("article");
-    card.className = "team-card";
+    card.className = `team-card${team.id === state.settings.myTeamId ? " my-team" : ""}`;
     const nameRow = document.createElement("div");
     nameRow.className = "team-name-row";
     const input = document.createElement("input");
     input.value = team.name;
-    input.setAttribute("aria-label", `Team ${index + 1} name`);
+    input.setAttribute("aria-label", `Manager ${index + 1} name`);
     input.addEventListener("input", () => {
-      team.name = input.value || `Team ${index + 1}`;
+      team.name = input.value || `Manager ${index + 1}`;
       renderDraftControls();
       renderSelectedPlayer();
+      renderMyTeamSummary();
       scheduleSave();
     });
     const remove = document.createElement("button");
@@ -562,9 +852,12 @@ function renderTeams() {
     remove.disabled = state.teams.length <= 1 || state.drafted.some((pick) => pick.teamId === team.id);
     remove.addEventListener("click", () => removeTeam(team.id));
     nameRow.append(input, remove);
+    const budget = document.createElement("div");
+    budget.className = "team-budget-row";
+    budget.innerHTML = `<span>Budget $${info.budgetRemaining}</span><strong>Max $${info.maxBid}</strong>`;
     const needs = document.createElement("div");
     needs.className = "needs-grid";
-    Object.entries(rosters[team.id]).forEach(([slot, count]) => {
+    Object.entries(info.roster).forEach(([slot, count]) => {
       const limit = ROSTER_LIMITS[slot];
       const item = document.createElement("div");
       item.className = `need ${count >= limit ? "full" : "open"}`;
@@ -572,7 +865,7 @@ function renderTeams() {
       item.innerHTML = `<span>${slot}</span><span>${count}/${limit}</span>`;
       needs.appendChild(item);
     });
-    card.append(nameRow, needs);
+    card.append(nameRow, budget, needs);
     fragment.appendChild(card);
   });
   ui.teamsList.replaceChildren(fragment);
@@ -581,37 +874,126 @@ function renderTeams() {
 function buildTeamRosters() {
   const rosters = {};
   state.teams.forEach((team) => {
-    rosters[team.id] = { QB: 0, RB: 0, WR: 0, TE: 0, FLEX: 0, DEF: 0, Bench: 0 };
+    rosters[team.id] = { QB: 0, RB: 0, WR: 0, TE: 0, FLEX: 0, DEF: 0, Bench: 0, IR: 0 };
   });
   state.drafted.forEach((pick) => {
     const roster = rosters[pick.teamId];
     const player = state.players[pick.playerId];
     if (!roster || !player) return;
-    assignRosterSlot(roster, player.position);
+    assignRosterSlot(roster, player);
   });
   return rosters;
 }
 
-function assignRosterSlot(roster, position) {
-  if (position === "DEF") {
+function assignRosterSlot(roster, player) {
+  if (isIrEligible(player) && roster.IR < ROSTER_LIMITS.IR) {
+    roster.IR += 1;
+  } else if (player.position === "DEF") {
     roster.DEF += 1;
-  } else if (ROSTER_LIMITS[position] && roster[position] < ROSTER_LIMITS[position]) {
-    roster[position] += 1;
-  } else if (FLEX_POSITIONS.has(position) && roster.FLEX < ROSTER_LIMITS.FLEX) {
+  } else if (ROSTER_LIMITS[player.position] && roster[player.position] < ROSTER_LIMITS[player.position]) {
+    roster[player.position] += 1;
+  } else if (FLEX_POSITIONS.has(player.position) && roster.FLEX < ROSTER_LIMITS.FLEX) {
     roster.FLEX += 1;
   } else {
     roster.Bench += 1;
   }
 }
 
+function isIrEligible(player) {
+  return /injured reserve/i.test(player.status || "");
+}
+
+function teamInfoMap() {
+  const rosters = buildTeamRosters();
+  const infos = {};
+  state.teams.forEach((team) => {
+    const spent = state.drafted.filter((pick) => pick.teamId === team.id).reduce((sum, pick) => sum + Number(pick.price || 0), 0);
+    const requiredFilled = REQUIRED_ROSTER_SLOTS.reduce((sum, slot) => sum + Math.min(rosters[team.id][slot], ROSTER_LIMITS[slot]), 0);
+    const remainingRequired = Math.max(0, REQUIRED_ROSTER_SIZE - requiredFilled);
+    const budgetRemaining = Math.max(0, Number(state.settings.budget || 200) - spent);
+    const maxBid = Math.max(0, budgetRemaining - Math.max(0, remainingRequired - 1));
+    infos[team.id] = {
+      id: team.id,
+      name: team.name,
+      roster: rosters[team.id],
+      spent,
+      budgetRemaining,
+      remainingRequired,
+      maxBid
+    };
+  });
+  return infos;
+}
+
+function rosterNeedText(roster) {
+  return Object.entries(roster)
+    .filter(([slot, count]) => count < ROSTER_LIMITS[slot])
+    .map(([slot, count]) => `${slot} ${count}/${ROSTER_LIMITS[slot]}`);
+}
+
+function needsPosition(roster, position) {
+  if (!roster) return false;
+  if (position === "DEF") return roster.DEF < ROSTER_LIMITS.DEF;
+  if (ROSTER_LIMITS[position] && roster[position] < ROSTER_LIMITS[position]) return true;
+  return FLEX_POSITIONS.has(position) && roster.FLEX < ROSTER_LIMITS.FLEX;
+}
+
+function scarcityWarnings(player) {
+  const infos = teamInfoMap();
+  const myInfo = infos[state.settings.myTeamId];
+  if (!myInfo) return [];
+  const positions = player ? [player.position] : ["QB", "RB", "WR", "TE", "DEF"];
+  return positions.map((position) => scarcityForPosition(position, player)).filter(Boolean);
+}
+
+function scarcityForPosition(position, player) {
+  const infos = teamInfoMap();
+  const myInfo = infos[state.settings.myTeamId];
+  if (!myInfo || !needsPosition(myInfo.roster, position)) {
+    return player ? { level: "low", text: `My Team does not have an urgent ${position} slot need.` } : null;
+  }
+  const otherTeams = state.teams.filter((team) => team.id !== state.settings.myTeamId);
+  const otherNeedCount = otherTeams.filter((team) => needsPosition(infos[team.id].roster, position)).length;
+  const otherNeedPct = otherTeams.length ? otherNeedCount / otherTeams.length : 0;
+  const tier = player ? effectiveTier(player, getPrep(player.id)) : bestAvailableTier(position);
+  const tierRemaining = availablePlayers().filter((candidate) => candidate.position === position && effectiveTier(candidate, getPrep(candidate.id)) === tier).length;
+  let level = "medium";
+  if (tierRemaining <= 2 || otherNeedPct >= 0.6) level = "high";
+  if (tierRemaining >= 5 && otherNeedPct <= 0.25) level = "low";
+  const text = `${position}: ${levelLabel(level)} urgency - ${otherNeedCount}/${otherTeams.length} other teams still need it; Tier ${tier || "?"} has ${tierRemaining} similar players left.`;
+  return { level, text, position, tier, tierRemaining, otherNeedCount };
+}
+
+function bestAvailableTier(position) {
+  const player = availablePlayers().find((candidate) => candidate.position === position);
+  return player ? effectiveTier(player, getPrep(player.id)) : "";
+}
+
+function selectedScarcityHtml(player) {
+  const warning = scarcityForPosition(player.position, player);
+  if (!warning) return "";
+  return `<div class="urgency ${warning.level}">${escapeHtml(warning.text)}</div>`;
+}
+
+function scarcityShortText(player) {
+  const warning = scarcityForPosition(player.position, player);
+  return warning ? warning.text : "";
+}
+
+function levelLabel(level) {
+  return { high: "higher", medium: "moderate", low: "lower" }[level] || "moderate";
+}
+
 function addTeam() {
-  state.teams.push({ id: cryptoSafeId("team"), name: `Team ${state.teams.length + 1}` });
+  state.teams.push({ id: cryptoSafeId("team"), name: `Manager ${state.teams.length + 1}` });
+  ensureSettings();
   renderAll();
   scheduleSave();
 }
 
 function removeTeam(teamId) {
   state.teams = state.teams.filter((team) => team.id !== teamId);
+  if (state.settings.myTeamId === teamId) state.settings.myTeamId = state.teams[0]?.id || "";
   renderAll();
   scheduleSave();
 }
@@ -623,9 +1005,77 @@ function teamName(teamId) {
 function clearFilters() {
   ui.searchInput.value = "";
   ui.positionFilter.value = "ALL";
-  ui.viewFilter.value = "available";
+  ui.tierFilter.value = "ALL";
+  ui.labelFilter.value = "ALL";
+  ui.sortFilter.value = "overall";
   invalidateFilters();
   renderPlayers();
+  renderStatus();
+}
+
+function renderPrompt(type = "bid") {
+  if (!ui.promptOutput) return;
+  ui.promptOutput.value = buildPrompt(type);
+}
+
+function copyPrompt(type) {
+  const prompt = buildPrompt(type);
+  ui.promptOutput.value = prompt;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(prompt).then(() => showMessage("Prompt copied.")).catch(() => fallbackCopy(prompt));
+  } else {
+    fallbackCopy(prompt);
+  }
+}
+
+function fallbackCopy(prompt) {
+  ui.promptOutput.focus();
+  ui.promptOutput.select();
+  document.execCommand("copy");
+  showMessage("Prompt copied.");
+}
+
+function buildPrompt(type) {
+  const context = promptContext();
+  if (type === "research") {
+    return `Research ${context.playerLine}. Given my ${context.leagueLine}, my roster is ${context.rosterLine}, budget is $${context.budget}, max bid is $${context.maxBid}, and open needs are ${context.needsLine}. Summarize current news, injury risk, role security, upside, and downside. Compare to similar remaining players: ${context.similarLine}.`;
+  }
+  if (type === "nomination") {
+    return `Given my ${context.leagueLine}, roster ${context.rosterLine}, budget $${context.budget}, max bid $${context.maxBid}, and open needs ${context.needsLine}, suggest my next nomination strategy. Consider other teams' needs (${context.otherNeedsLine}), tier scarcity (${context.scarcityLine}), and whether I should nominate a target, a price-enforcer, or a position I do not need.`;
+  }
+  return `Given my ${context.leagueLine}, my roster is ${context.rosterLine}, my budget is $${context.budget}, my max bid is $${context.maxBid}, should I bid on ${context.playerLine} up to $X? Consider current news, injury risk, tier scarcity (${context.scarcityLine}), similar players remaining (${context.similarLine}), other teams' needs (${context.otherNeedsLine}), and roster construction.`;
+}
+
+function promptContext() {
+  const player = state.players[state.selectedPlayerId];
+  const prep = getPrep(state.selectedPlayerId);
+  const infos = teamInfoMap();
+  const myInfo = infos[state.settings.myTeamId];
+  const myPicks = state.drafted.filter((pick) => pick.teamId === state.settings.myTeamId).map((pick) => `${state.players[pick.playerId]?.name || "Unknown"} $${pick.price}`);
+  const similar = player ? availablePlayers()
+    .filter((candidate) => candidate.id !== player.id && candidate.position === player.position && effectiveTier(candidate, getPrep(candidate.id)) === effectiveTier(player, prep))
+    .slice(0, 6)
+    .map((candidate) => `${candidate.name} (${candidate.positionRankLabel})`) : [];
+  const warnings = player ? scarcityWarnings(player) : scarcityWarnings();
+  return {
+    leagueLine: `${state.teams.length}-team 2QB full PPR auction draft`,
+    playerLine: player ? `${player.name} (${player.positionRankLabel}, Tier ${effectiveTier(player, prep)}, ${player.team})` : "the selected player",
+    rosterLine: myPicks.length ? myPicks.join(", ") : "empty",
+    budget: myInfo?.budgetRemaining ?? state.settings.budget,
+    maxBid: myInfo?.maxBid ?? state.settings.budget,
+    needsLine: myInfo ? rosterNeedText(myInfo.roster).join(", ") || "none" : "unknown",
+    similarLine: similar.length ? similar.join(", ") : "none in this tier",
+    otherNeedsLine: otherNeedsSummary(),
+    scarcityLine: warnings.map((warning) => warning.text).join(" | ") || "no urgent scarcity warnings"
+  };
+}
+
+function otherNeedsSummary() {
+  const infos = teamInfoMap();
+  return ["QB", "RB", "WR", "TE", "DEF"].map((position) => {
+    const count = state.teams.filter((team) => team.id !== state.settings.myTeamId && needsPosition(infos[team.id].roster, position)).length;
+    return `${position}: ${count}`;
+  }).join(", ");
 }
 
 function exportState() {
@@ -638,7 +1088,7 @@ function exportState() {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showMessage("Exported JSON with teams, prep fields, draft picks, and player data.");
+  showMessage("Exported JSON with My Team, labels, tiers, budgets, team names, picks, and player data.");
 }
 
 function importState(event) {
@@ -655,6 +1105,10 @@ function importState(event) {
     }
   };
   reader.readAsText(file);
+}
+
+function labelName(label) {
+  return { target: "Target", sleeper: "Sleeper", avoid: "Avoid" }[label] || "";
 }
 
 function showMessage(message, isError = false, auto = false) {

@@ -37,3 +37,22 @@ Persist all draft picks, team names, player prep fields, imported player data, a
 ### Consequences
 
 The app remains fast and offline-friendly after import, but multi-device collaboration is out of scope until a backend is introduced.
+
+## ADR-FAD-0003: Explainable Local Rankings And Prompt Helper
+
+- Status: Accepted
+- Date: 2026-07-08
+- Pass ID: FAD-2026-07-08-002
+- Tags: `fallback-rankings`, `my-team`, `budget-max-bid`, `chatgpt-helper`
+
+### Context
+
+The app needs draft-day ranking, scarcity, and research support without introducing paid APIs, backend services, or pretending Sleeper exposes official fantasy rankings.
+
+### Decision
+
+Use Sleeper player data as the seed source, then produce local fallback ranks from fantasy-relevant position grouping, active/team status, Sleeper search rank when present, depth metadata, team defenses, and trending signals. Keep generated tiers editable. Generate copyable ChatGPT prompts locally from My Team context, roster needs, budget/max-bid math, selected-player tier, similar remaining players, and other teams' needs instead of calling the OpenAI API.
+
+### Consequences
+
+The app remains static, fast, and Pages-ready. Rankings are transparent but not authoritative; users should treat them as a draft-board starting point and use the prompt helper for live external research.

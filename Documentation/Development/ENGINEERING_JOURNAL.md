@@ -162,3 +162,154 @@ Created a root static web app with resilient Sleeper imports, trending-player im
 ### Deployment
 
 GitHub Pages is ready to serve repository-root static files after Pages is enabled for branch `main` and folder `/`.
+
+## Pass FAD-2026-07-08-002
+
+- Pass Type: Feature
+- Epic ID: E-FAD-LIVE-AUCTION
+- Architecture Tags: `static-web-app`, `sleeper-import`, `draft-state`, `player-prep`, `live-auction-ui`, `my-team`, `fallback-rankings`, `budget-max-bid`, `chatgpt-helper`, `github-pages`
+- Branch: `main`
+- Commit Reference: Uncommitted at documentation update; base `c367ae48046ada69c5333acedb014ce92b86101b`
+- User Prompt: "Reasoning level: High
+
+Repo: wx9r6nkgr6-boop/fantasy-auction-draft
+
+Build the next aggressive feature pass.
+
+User decisions:
+- Use Sleeper player data as the initial ranking source if available.
+- Reduce player pool dramatically:
+  - Include fantasy-relevant offensive players only: QB, RB, WR, TE.
+  - Remove individual defensive players.
+  - Include NFL team defenses as DEF/DST entries only.
+  - Filter out inactive/free-agent/deep irrelevant players where reasonable.
+- League team names are just people’s names.
+- Add “My Team” designation.
+- My Team should be pinned/highlighted and recommendations should prioritize My Team roster needs.
+- Keep all team max bids visible.
+- Auto-create tiers, but make tiers editable.
+- Player labels should be: Target, Sleeper, Avoid.
+- Sort default should be ranking order.
+- Also show position rank like QB1, RB12, WR34, TE8.
+
+Features to add:
+
+1. My Team
+- Add setting to designate which team is mine.
+- Persist in localStorage and JSON import/export.
+- Pin/highlight My Team in the team panel.
+- Add My Team summary with budget, max bid, roster needs, and open slots.
+
+2. Player pool cleanup
+- Exclude individual defensive players.
+- Add team defenses only.
+- Create a smaller draft-relevant list from Sleeper data.
+- Keep a toggle/setting for “show deep player pool” if useful.
+
+3. Rankings
+- Create fallback rankings from available Sleeper data.
+- If true rankings are not available from Sleeper, do not pretend they are.
+- Use a reasonable internal ordering based on fantasy-relevant player grouping, position, active status, and trending status.
+- Add overall rank display.
+- Add position rank display: QB1, QB2, RB1, WR1, TE1, DEF1, etc.
+- Default sort: overall rank.
+- Add sort options:
+  - Overall rank
+  - Position rank
+  - Tier
+  - Watch/Target/Sleeper/Avoid
+  - Trending
+  - Available only
+
+4. Editable tiers
+- Auto-create tiers based on ranking bands and position.
+- Display tier on player rows.
+- Allow user to edit a player’s tier.
+- Persist tier edits in localStorage and JSON.
+- Add filters by tier and position.
+
+5. Labels
+- Add Target, Sleeper, Avoid labels.
+- Allow quick toggling from player row/detail panel.
+- Persist labels in localStorage and JSON.
+- Add filters for these labels.
+
+6. Team max bid visibility
+- Show each team’s remaining budget and max bid clearly.
+- Max bid formula:
+  remaining budget minus $1 for every remaining required roster spot after the current bid.
+- Keep this visible during live draft entry.
+
+7. Team needs and tier scarcity
+- Show roster counters for each team:
+  QB 0/2, RB 1/2, WR 2/3, TE 1/1, FLEX 0/1, Bench, IR.
+- Show My Team needs prominently.
+- Add simple tier scarcity warnings:
+  - If My Team needs a position and many other teams also need that position, show higher urgency.
+  - If My Team needs a position but most other teams are already filled there, show lower urgency.
+  - If a tier has several similar remaining players, show less urgency.
+  - If a tier is almost empty and My Team still needs that position, show higher urgency.
+- Keep the logic simple, explainable, and not overly rigid.
+
+8. ChatGPT research helper
+- Add an “Ask ChatGPT” helper panel, but do not call the OpenAI API directly.
+- The panel should generate a copyable prompt using current app context:
+  - My roster
+  - Budget
+  - Max bid
+  - Open needs
+  - Player being considered
+  - Player tier
+  - Similar players remaining
+  - Other teams’ needs
+- Example output:
+  “Given my 10-team 2QB full PPR auction draft, my roster is..., my budget is..., should I bid on [Player] up to $X? Consider current news, injury risk, tier scarcity, and roster construction.”
+- Add buttons:
+  - Copy player research prompt
+  - Copy bid decision prompt
+  - Copy nomination strategy prompt
+- This lets the user paste into ChatGPT for live reasoning/news research without needing an API key or backend.
+
+9. UI/UX
+- Keep iPad Pro 12.9 landscape optimized.
+- Large tap targets.
+- Fast draft-day workflow.
+- Do not bury the auction entry form.
+- Avoid lag with thousands of players.
+
+10. Testing/reporting
+- Test locally with static server.
+- Run JS syntax checks.
+- Commit and push.
+- Report:
+  - Files changed
+  - Commit hash
+  - Push status
+  - GitHub Pages readiness
+  - Known limitations
+  - Recommended next features"
+
+### Implementation
+
+Added a live-auction pass around My Team and fallback draft-board intelligence. The app now persists a My Team manager, pins/highlights that manager, displays budget/max bid/open-slot summary, and keeps team max bids visible. Sleeper import now creates a cleaned QB/RB/WR/TE plus team-defense pool, excludes kickers and individual defensive players, supports a deep-pool toggle, and produces fallback overall and position ranks without representing them as official Sleeper rankings. Player rows now show overall rank, position rank, editable tier, and Target/Sleeper/Avoid labels. The draft board includes tier, position, label, sort, trending, and available-only controls. A local-only Ask ChatGPT helper generates copyable research, bid, and nomination prompts from current app context.
+
+### Verification
+
+- Build: `node --check app.js` passed.
+- Static model verification: Node VM test passed for My Team persistence, labels, tiers, IDP exclusion, team-defense creation, roster counters, budget/max-bid math, and position rank labels.
+- Browser testing: Local static server at `http://localhost:8081/` loaded successfully in the in-app browser.
+- Responsive testing: iPad Pro 12.9 landscape viewport `1366x1024` passed with no horizontal overflow and three-column layout.
+- Sleeper import: Passed with 612 core players and 1,157 cleaned players when deep pool is enabled.
+- Position filtering: Passed for QB, RB, WR, TE, and DEF; DEF showed 32 team defenses.
+- Label/tier persistence: Target label, custom tier `2A`, custom value, and notes persisted through reload.
+- Draft/undo: My Team draft updated budget, max bid, roster counters, and selected-player drafted state; undo restored drafted count.
+- Trending: Sleeper trending import passed and trending sort displayed trending badges.
+- Prompt helper: Bid prompt generation and copy action passed without direct API calls.
+- Console audit: Browser error log was empty after interaction checks.
+- Deployment to iPhone: Not applicable; static web app.
+- Deployment to iPad: Not applicable; static web app. Browser viewport verification passed.
+- Deployment to Apple Watch: Not applicable; no Watch target.
+
+### Deployment
+
+GitHub Pages remains ready to serve repository-root static files after Pages is enabled for branch `main` and folder `/`.

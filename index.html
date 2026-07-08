@@ -12,6 +12,7 @@
       <div>
         <p class="eyebrow">Live auction draft room</p>
         <h1>Fantasy Auction Draft</h1>
+        <p class="rank-note">Rankings are an explainable fallback from Sleeper data, active status, draft relevance, and trending signals. They are not official Sleeper rankings.</p>
       </div>
       <div class="topbar-actions">
         <button id="importSleeperBtn" class="primary">Refresh Sleeper</button>
@@ -24,7 +25,7 @@
 
     <section class="status-grid" aria-label="App status">
       <div>
-        <span class="status-label">Players</span>
+        <span class="status-label">Draftable pool</span>
         <strong id="playerCount">0</strong>
       </div>
       <div>
@@ -43,16 +44,30 @@
 
     <main class="workspace">
       <aside class="panel controls-panel" aria-label="Draft controls">
+        <section class="my-team-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Pinned team</p>
+              <h2>My Team</h2>
+            </div>
+          </div>
+          <label for="myTeamSelect">Manager</label>
+          <select id="myTeamSelect"></select>
+          <div id="myTeamSummary" class="my-team-summary"></div>
+        </section>
+
         <section class="selected-card">
           <p class="eyebrow">Selected player</p>
           <h2 id="selectedName">No player selected</h2>
-          <p id="selectedMeta">Pick a player to draft or edit prep notes.</p>
+          <p id="selectedMeta">Pick a player to draft, label, or research.</p>
           <div id="selectedFlags" class="flag-row"></div>
+          <div id="selectedScarcity" class="scarcity-box"></div>
         </section>
 
         <section class="draft-box">
-          <label for="draftTeam">Team</label>
+          <label for="draftTeam">Draft to team</label>
           <select id="draftTeam"></select>
+          <div id="draftBudgetHint" class="budget-hint"></div>
           <label for="draftPrice">Auction price</label>
           <input id="draftPrice" type="number" min="0" inputmode="numeric" value="1">
           <button id="draftBtn" class="primary" disabled>Draft Player</button>
@@ -60,17 +75,32 @@
         </section>
 
         <section class="prep-box">
-          <div class="split-row">
-            <label><input id="favoriteToggle" type="checkbox"> Favorite</label>
-            <label><input id="watchToggle" type="checkbox"> Watch</label>
+          <div class="label-buttons" aria-label="Player labels">
+            <button id="targetToggle" type="button" data-label="target">Target</button>
+            <button id="sleeperToggle" type="button" data-label="sleeper">Sleeper</button>
+            <button id="avoidToggle" type="button" data-label="avoid">Avoid</button>
           </div>
           <label for="tierInput">Tier</label>
-          <input id="tierInput" type="text" placeholder="Example: 2">
+          <input id="tierInput" type="text" placeholder="Auto unless edited">
           <label for="customValueInput">Custom auction value</label>
           <input id="customValueInput" type="number" min="0" inputmode="numeric" placeholder="Example: 18">
-          <label><input id="dndToggle" type="checkbox"> Do not draft</label>
           <label for="notesInput">Personal notes</label>
-          <textarea id="notesInput" rows="5" placeholder="Targets, injury concerns, role notes..."></textarea>
+          <textarea id="notesInput" rows="4" placeholder="Targets, injury concerns, role notes..."></textarea>
+        </section>
+
+        <section class="chatgpt-box">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Research helper</p>
+              <h2>Ask ChatGPT</h2>
+            </div>
+          </div>
+          <div class="prompt-actions">
+            <button id="copyResearchPromptBtn">Copy player research prompt</button>
+            <button id="copyBidPromptBtn">Copy bid decision prompt</button>
+            <button id="copyNominationPromptBtn">Copy nomination strategy prompt</button>
+          </div>
+          <textarea id="promptOutput" rows="8" readonly placeholder="Select a player to generate a copyable prompt."></textarea>
         </section>
       </aside>
 
@@ -78,7 +108,7 @@
         <div class="filter-bar">
           <label class="search-wrap">
             <span>Search</span>
-            <input id="searchInput" type="search" placeholder="Name, team, notes, tier...">
+            <input id="searchInput" type="search" placeholder="Name, team, notes, tier, label...">
           </label>
           <label>
             <span>Position</span>
@@ -89,20 +119,38 @@
               <option value="WR">WR</option>
               <option value="TE">TE</option>
               <option value="DEF">DEF</option>
-              <option value="K">K</option>
             </select>
           </label>
           <label>
-            <span>View</span>
-            <select id="viewFilter">
-              <option value="available">Available</option>
-              <option value="all">All players</option>
-              <option value="drafted">Drafted</option>
-              <option value="watch">Watch list</option>
-              <option value="favorites">Favorites</option>
-              <option value="dnd">Do not draft</option>
-              <option value="trending">Trending</option>
+            <span>Tier</span>
+            <select id="tierFilter">
+              <option value="ALL">All</option>
             </select>
+          </label>
+          <label>
+            <span>Label</span>
+            <select id="labelFilter">
+              <option value="ALL">All</option>
+              <option value="target">Target</option>
+              <option value="sleeper">Sleeper</option>
+              <option value="avoid">Avoid</option>
+              <option value="unlabeled">Unlabeled</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="sortFilter">
+              <option value="overall">Overall rank</option>
+              <option value="position">Position rank</option>
+              <option value="tier">Tier</option>
+              <option value="label">Target/Sleeper/Avoid</option>
+              <option value="trending">Trending</option>
+              <option value="available">Available only</option>
+            </select>
+          </label>
+          <label class="toggle-control">
+            <input id="showDeepPoolToggle" type="checkbox">
+            <span>Show deep pool</span>
           </label>
           <button id="clearFiltersBtn">Clear</button>
         </div>
@@ -114,10 +162,12 @@
         <div class="teams-header">
           <div>
             <p class="eyebrow">League</p>
-            <h2>Teams & Needs</h2>
+            <h2>Managers & Max Bids</h2>
           </div>
-          <button id="addTeamBtn">Add Team</button>
+          <button id="addTeamBtn">Add Manager</button>
         </div>
+        <label for="leagueBudgetInput">Team budget</label>
+        <input id="leagueBudgetInput" type="number" min="1" inputmode="numeric" value="200">
         <div id="teamsList" class="teams-list"></div>
       </aside>
     </main>
@@ -125,12 +175,19 @@
 
   <template id="playerTemplate">
     <article class="player-card">
-      <button class="quick-toggle favorite-btn" type="button" title="Toggle favorite">☆</button>
-      <button class="quick-toggle watch-btn" type="button" title="Toggle watch">○</button>
+      <div class="rank-stack">
+        <strong class="overall-rank"></strong>
+        <span class="position-rank"></span>
+      </div>
       <div class="player-main">
         <h3></h3>
         <p class="player-meta"></p>
         <p class="player-notes"></p>
+      </div>
+      <div class="quick-labels">
+        <button class="label-toggle target-row-btn" type="button" data-label="target">Target</button>
+        <button class="label-toggle sleeper-row-btn" type="button" data-label="sleeper">Sleeper</button>
+        <button class="label-toggle avoid-row-btn" type="button" data-label="avoid">Avoid</button>
       </div>
       <div class="player-badges"></div>
     </article>
