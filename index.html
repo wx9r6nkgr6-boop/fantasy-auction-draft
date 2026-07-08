@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fantasy Auction Draft</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Live auction draft room</p>
+        <h1>Fantasy Auction Draft</h1>
+      </div>
+      <div class="topbar-actions">
+        <button id="importSleeperBtn" class="primary">Refresh Sleeper</button>
+        <button id="importTrendingBtn">Trending</button>
+        <button id="exportBtn">Export JSON</button>
+        <label class="file-button" for="importFile">Import JSON</label>
+        <input id="importFile" type="file" accept="application/json">
+      </div>
+    </header>
+
+    <section class="status-grid" aria-label="App status">
+      <div>
+        <span class="status-label">Players</span>
+        <strong id="playerCount">0</strong>
+      </div>
+      <div>
+        <span class="status-label">Available</span>
+        <strong id="availableCount">0</strong>
+      </div>
+      <div>
+        <span class="status-label">Drafted</span>
+        <strong id="draftedCount">0</strong>
+      </div>
+      <div>
+        <span class="status-label">Autosave</span>
+        <strong id="autosaveStatus">Ready</strong>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <aside class="panel controls-panel" aria-label="Draft controls">
+        <section class="selected-card">
+          <p class="eyebrow">Selected player</p>
+          <h2 id="selectedName">No player selected</h2>
+          <p id="selectedMeta">Pick a player to draft or edit prep notes.</p>
+          <div id="selectedFlags" class="flag-row"></div>
+        </section>
+
+        <section class="draft-box">
+          <label for="draftTeam">Team</label>
+          <select id="draftTeam"></select>
+          <label for="draftPrice">Auction price</label>
+          <input id="draftPrice" type="number" min="0" inputmode="numeric" value="1">
+          <button id="draftBtn" class="primary" disabled>Draft Player</button>
+          <button id="undoBtn">Undo Last Draft</button>
+        </section>
+
+        <section class="prep-box">
+          <div class="split-row">
+            <label><input id="favoriteToggle" type="checkbox"> Favorite</label>
+            <label><input id="watchToggle" type="checkbox"> Watch</label>
+          </div>
+          <label for="tierInput">Tier</label>
+          <input id="tierInput" type="text" placeholder="Example: 2">
+          <label for="customValueInput">Custom auction value</label>
+          <input id="customValueInput" type="number" min="0" inputmode="numeric" placeholder="Example: 18">
+          <label><input id="dndToggle" type="checkbox"> Do not draft</label>
+          <label for="notesInput">Personal notes</label>
+          <textarea id="notesInput" rows="5" placeholder="Targets, injury concerns, role notes..."></textarea>
+        </section>
+      </aside>
+
+      <section class="panel players-panel" aria-label="Player board">
+        <div class="filter-bar">
+          <label class="search-wrap">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="Name, team, notes, tier...">
+          </label>
+          <label>
+            <span>Position</span>
+            <select id="positionFilter">
+              <option value="ALL">All</option>
+              <option value="QB">QB</option>
+              <option value="RB">RB</option>
+              <option value="WR">WR</option>
+              <option value="TE">TE</option>
+              <option value="DEF">DEF</option>
+              <option value="K">K</option>
+            </select>
+          </label>
+          <label>
+            <span>View</span>
+            <select id="viewFilter">
+              <option value="available">Available</option>
+              <option value="all">All players</option>
+              <option value="drafted">Drafted</option>
+              <option value="watch">Watch list</option>
+              <option value="favorites">Favorites</option>
+              <option value="dnd">Do not draft</option>
+              <option value="trending">Trending</option>
+            </select>
+          </label>
+          <button id="clearFiltersBtn">Clear</button>
+        </div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <div id="playerList" class="player-list" tabindex="0"></div>
+      </section>
+
+      <aside class="panel teams-panel" aria-label="Teams and roster needs">
+        <div class="teams-header">
+          <div>
+            <p class="eyebrow">League</p>
+            <h2>Teams & Needs</h2>
+          </div>
+          <button id="addTeamBtn">Add Team</button>
+        </div>
+        <div id="teamsList" class="teams-list"></div>
+      </aside>
+    </main>
+  </div>
+
+  <template id="playerTemplate">
+    <article class="player-card">
+      <button class="quick-toggle favorite-btn" type="button" title="Toggle favorite">☆</button>
+      <button class="quick-toggle watch-btn" type="button" title="Toggle watch">○</button>
+      <div class="player-main">
+        <h3></h3>
+        <p class="player-meta"></p>
+        <p class="player-notes"></p>
+      </div>
+      <div class="player-badges"></div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
