@@ -88,19 +88,31 @@
           <textarea id="notesInput" rows="4" placeholder="Targets, injury concerns, role notes..."></textarea>
         </section>
 
-        <section class="chatgpt-box">
+        <section id="draftAssistantPanel" class="draft-assistant-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Research helper</p>
-              <h2>Ask ChatGPT</h2>
+              <p class="eyebrow">Context lock</p>
+              <h2>Draft Assistant</h2>
             </div>
+            <button id="toggleAssistantBtn" type="button" aria-expanded="true">Collapse</button>
           </div>
-          <div class="prompt-actions">
-            <button id="copyResearchPromptBtn">Copy player research prompt</button>
-            <button id="copyBidPromptBtn">Copy bid decision prompt</button>
-            <button id="copyNominationPromptBtn">Copy nomination strategy prompt</button>
+          <div id="assistantBody" class="assistant-body">
+            <div id="assistantSummary" class="assistant-summary"></div>
+            <label for="promptTypeSelect">Prompt type</label>
+            <select id="promptTypeSelect">
+              <option value="research">Research Player</option>
+              <option value="bid" selected>Should I Bid?</option>
+              <option value="nomination">Nomination Strategy</option>
+              <option value="strategy">Overall Strategy</option>
+            </select>
+            <div class="prompt-actions">
+              <button id="previewPromptBtn" type="button">Preview Prompt</button>
+              <button id="copyPromptBtn" type="button">Copy Prompt</button>
+              <button id="openChatGPTBtn" type="button">Open ChatGPT</button>
+            </div>
+            <div id="assistantToast" class="assistant-toast" role="status" aria-live="polite"></div>
+            <textarea id="promptOutput" rows="8" readonly placeholder="Preview a prompt to inspect the full context."></textarea>
           </div>
-          <textarea id="promptOutput" rows="8" readonly placeholder="Select a player to generate a copyable prompt."></textarea>
         </section>
       </aside>
 
@@ -193,6 +205,8 @@
     </article>
   </template>
 
+  <script src="js/contextLock.js"></script>
+  <script src="js/chatgpt.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

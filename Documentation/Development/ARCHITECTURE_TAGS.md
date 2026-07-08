@@ -14,3 +14,5 @@ Controlled terms for engineering records.
 | `fallback-rankings` | Explainable internal player ordering derived from Sleeper data, active status, draft relevance, and trending signals without claiming official rankings. |
 | `budget-max-bid` | Auction budget, remaining spend, required slot math, and max-bid visibility for teams. |
 | `chatgpt-helper` | Local-only copyable prompt generation for external ChatGPT research without direct OpenAI API calls. |
+| `draft-assistant` | Persistent, collapsible live-draft assistant UI that displays locked draft context and prompt actions. |
+| `context-lock` | Reusable draft-state snapshot module used as the single source of truth for prompt generation and future AI integrations. |

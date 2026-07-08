@@ -313,3 +313,273 @@ Added a live-auction pass around My Team and fallback draft-board intelligence. 
 ### Deployment
 
 GitHub Pages remains ready to serve repository-root static files after Pages is enabled for branch `main` and folder `/`.
+
+## Pass FAD-2026-07-08-003
+
+- Pass Type: Feature
+- Epic ID: E-FAD-DRAFT-ASSISTANT
+- Architecture Tags: `static-web-app`, `draft-state`, `player-prep`, `live-auction-ui`, `my-team`, `budget-max-bid`, `chatgpt-helper`, `draft-assistant`, `context-lock`, `github-pages`
+- Branch: `main`
+- Commit Reference: Uncommitted at documentation update; base `5748b6dfe16ddb2e67e9778c232242ebebfe6655`
+- User Prompt: "Reasoning level: High
+
+Repo: wx9r6nkgr6-boop/fantasy-auction-draft
+
+This pass focuses on Draft Assistant integration and contextual intelligence.
+
+DO NOT integrate the OpenAI API.
+
+DO NOT require any backend.
+
+DO NOT expose API keys.
+
+Instead, integrate ChatGPT through a prompt-generation system.
+
+====================================================
+PART 1 - DRAFT ASSISTANT PANEL
+====================================================
+
+Add a persistent Draft Assistant panel optimized for iPad landscape.
+
+It should be collapsible.
+
+The panel should always know the current draft state.
+
+Display:
+
+• My Team
+• Remaining budget
+• Maximum bid
+• Current roster
+• Remaining starting needs
+• Open bench spots
+• Current player (if selected)
+• Current tier
+• Position rank
+• Overall rank
+• Number of players remaining in same tier
+• Number of teams still needing that position
+• Current draft number
+• Auction inflation (placeholder if not implemented)
+
+====================================================
+PART 2 - CHATGPT PROMPT ENGINE
+====================================================
+
+Create a prompt builder.
+
+This should automatically generate detailed prompts from the current draft state.
+
+The user should never have to manually type context.
+
+Add four prompt types.
+
+----------------------------------------
+1. Research Player
+----------------------------------------
+
+Focus on:
+
+• recent news
+• injury concerns
+• camp reports
+• role
+• upside
+• downside
+• recommendation
+• comparison against remaining players
+
+----------------------------------------
+2. Should I Bid?
+----------------------------------------
+
+Include:
+
+• current bid
+• suggested max bid
+• remaining budget
+• roster
+• remaining tier
+• scarcity
+• alternatives
+
+Ask ChatGPT whether to continue bidding.
+
+----------------------------------------
+3. Nomination Strategy
+----------------------------------------
+
+Include:
+
+• my roster
+• other teams' needs
+• remaining budgets
+• remaining tiers
+
+Ask ChatGPT who I should nominate and why.
+
+----------------------------------------
+4. Overall Strategy
+----------------------------------------
+
+Summarize:
+
+• my roster
+• budgets
+• position needs
+• roster construction
+
+Ask ChatGPT what my priorities should be over the next several nominations.
+
+====================================================
+PART 3 - USER EXPERIENCE
+====================================================
+
+Each prompt should have:
+
+Copy Prompt
+
+Preview Prompt
+
+Open ChatGPT
+
+Open ChatGPT should open:
+
+https://chatgpt.com/
+
+The prompt should already be copied to the clipboard.
+
+Display a toast:
+
+\"Prompt copied. Paste into ChatGPT.\"
+
+====================================================
+PART 4 - DRAFT CONTEXT LOCK
+====================================================
+
+Create a Draft Context Lock module.
+
+The app should continuously maintain a concise snapshot of the current draft.
+
+This snapshot should automatically update after every meaningful draft action.
+
+The snapshot should include:
+
+League settings
+
+My Team
+
+Current roster
+
+Remaining budget
+
+Maximum bid
+
+Open starting positions
+
+Bench spots remaining
+
+Current auction inflation (when available)
+
+Current positional scarcity
+
+Remaining players by tier
+
+Current draft number
+
+Other teams' remaining budgets
+
+Other teams' positional needs
+
+Target / Sleeper / Avoid labels
+
+Personal notes
+
+The Draft Context Lock should become the single source of truth for every ChatGPT prompt.
+
+Individual prompt builders should only add the specific player, nomination, or decision currently being evaluated.
+
+The Draft Context Lock should be implemented as a standalone module (for example js/contextLock.js) so future AI integrations can reuse it without changing the Draft Assistant UI.
+
+====================================================
+PART 5 - ARCHITECTURE
+====================================================
+
+Create:
+
+js/chatgpt.js
+
+The prompt engine should be completely independent.
+
+Future API integration should only require replacing the transport layer while keeping the prompt builder intact.
+
+====================================================
+PART 6 - UI
+====================================================
+
+Keep everything optimized for:
+
+12.9\" iPad Pro landscape
+
+Large tap targets
+
+Minimal clicks
+
+The Draft Assistant should feel like another panel in the app rather than a popup.
+
+====================================================
+PART 7 - TESTING
+====================================================
+
+Verify:
+
+Prompt generation
+
+Clipboard copy
+
+ChatGPT opens correctly
+
+Prompt preview
+
+GitHub Pages compatibility
+
+Commit
+
+Push
+
+Report:
+
+Files changed
+
+Commit hash
+
+Push status
+
+Testing
+
+Limitations
+
+Recommended next pass"
+
+### Implementation
+
+Added a persistent collapsible Draft Assistant panel inside the live draft controls. Created `js/contextLock.js` as the standalone Draft Context Lock snapshot module and `js/chatgpt.js` as an independent prompt engine. Prompt generation now supports Research Player, Should I Bid, Nomination Strategy, and Overall Strategy. The assistant snapshot includes league settings, My Team, roster, budget, max bid, starting needs, bench spots, inflation placeholder, positional scarcity, remaining tiers, draft number, other-team budgets/needs, labels, and notes. Copy and Open ChatGPT actions copy the prompt and open `https://chatgpt.com/` without API calls, a backend, or API keys.
+
+### Verification
+
+- Build: `node --check app.js`, `node --check js/contextLock.js`, and `node --check js/chatgpt.js` passed.
+- Module verification: Node VM test passed for Draft Context Lock snapshots, same-tier counts, prompt generation, copy transport, and ChatGPT URL transport.
+- Browser testing: Local static server at `http://localhost:8082/` loaded successfully in the in-app browser.
+- Responsive testing: iPad Pro 12.9 landscape viewport `1366x1024` passed with no horizontal overflow.
+- Prompt preview: Research Player preview generated the expected detailed prompt without manual context typing.
+- Clipboard copy: Copy Prompt copied the selected-player prompt and displayed `Prompt copied. Paste into ChatGPT.`
+- ChatGPT open: Open ChatGPT opened `https://chatgpt.com/` after copying the prompt.
+- Draft context update: Drafting a selected player updated draft number, roster, budget, max bid, same-tier count, and generated prompt context immediately.
+- Console audit: Local app error log was empty. An external ChatGPT FedCM sign-in warning appeared on the ChatGPT page only and was not from the local app.
+- Deployment to iPhone: Not applicable; static web app.
+- Deployment to iPad: Not applicable; static web app. Browser viewport verification passed.
+- Deployment to Apple Watch: Not applicable; no Watch target.
+
+### Deployment
+
+GitHub Pages compatibility is preserved because the app remains a static root `index.html` with local `styles.css`, `app.js`, and `js/` scripts.

@@ -10,7 +10,8 @@ Static browser app for running a live fantasy football auction draft.
 - My Team designation with pinned budget, max bid, roster needs, and scarcity guidance.
 - Team budget and max-bid visibility for every manager.
 - JSON export/import and localStorage autosave.
-- Local-only Ask ChatGPT prompt helper with no API key or backend.
+- Collapsible Draft Assistant panel backed by a reusable Draft Context Lock.
+- Local-only ChatGPT prompt engine with preview, copy, and open-ChatGPT flows. No API key or backend.
 
 ## Run locally
 

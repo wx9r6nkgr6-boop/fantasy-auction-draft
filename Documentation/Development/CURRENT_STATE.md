@@ -1,6 +1,6 @@
 # Current State
 
-Last updated by Pass: FAD-2026-07-08-002
+Last updated by Pass: FAD-2026-07-08-003
 
 ## Static Web App
 
@@ -11,7 +11,7 @@ Last updated by Pass: FAD-2026-07-08-002
 - Next Work: Add automated regression tests around state import/export, ranking stability, roster assignment, and max-bid math.
 - Related Epics: E-FAD-FOUNDATION
 - Architecture Tags: `static-web-app`, `live-auction-ui`, `github-pages`
-- Last Updating Pass: FAD-2026-07-08-002
+- Last Updating Pass: FAD-2026-07-08-003
 
 ## Sleeper Import
 
@@ -50,12 +50,23 @@ Last updated by Pass: FAD-2026-07-08-002
 
 - Status: Open
 - Priority: High
-- Known Issues: Scarcity warnings are intentionally simple and do not include projection systems, news, or advanced inflation.
+- Known Issues: Scarcity warnings are intentionally simple and do not include projection systems, news, or advanced inflation. Auction inflation is shown as a placeholder.
 - Technical Debt: Max-bid logic assumes $1 minimum bids and required roster slots excluding optional IR.
 - Next Work: Add configurable roster settings and optional manual scoring notes for prompt generation.
 - Related Epics: E-FAD-LIVE-AUCTION
-- Architecture Tags: `my-team`, `budget-max-bid`, `fallback-rankings`, `chatgpt-helper`
-- Last Updating Pass: FAD-2026-07-08-002
+- Architecture Tags: `my-team`, `budget-max-bid`, `fallback-rankings`, `chatgpt-helper`, `draft-assistant`, `context-lock`
+- Last Updating Pass: FAD-2026-07-08-003
+
+## Draft Assistant And Context Lock
+
+- Status: Open
+- Priority: High
+- Known Issues: ChatGPT opens externally and requires the user to paste the copied prompt manually. No API transport is implemented by design.
+- Technical Debt: Context Lock is global-browser-script based for GitHub Pages simplicity; future modular builds could expose it as an ES module.
+- Next Work: Add prompt templates for post-draft audit and live nomination queue once roster/scoring settings are configurable.
+- Related Epics: E-FAD-DRAFT-ASSISTANT
+- Architecture Tags: `draft-assistant`, `context-lock`, `chatgpt-helper`, `live-auction-ui`
+- Last Updating Pass: FAD-2026-07-08-003
 
 ## Resolved Regression History
 
@@ -63,16 +74,19 @@ Last updated by Pass: FAD-2026-07-08-002
 - FAD-2026-07-08-001: Fixed Sleeper trending mismatch by preserving the all-player response map key as the player ID.
 - FAD-2026-07-08-001: Replaced starter sample numeric IDs with synthetic IDs to prevent sample prep from attaching to real Sleeper players after refresh.
 - FAD-2026-07-08-002: Fixed v2 autosave/import rank instability by reading both Sleeper snake_case fields and exported camelCase fields in the player normalizer.
+- FAD-2026-07-08-003: Replaced inline prompt construction with Draft Context Lock and independent prompt engine so all prompts use one locked context snapshot.
 
 ## Open Regression History
 
 - FAD-2026-07-08-001: Requested commit `7efdba823b6c33c34476f0224c17a008d4b52ef2` was unavailable locally and remotely, so it could not be pushed.
 - FAD-2026-07-08-002: Fallback ranking quality is limited by Sleeper metadata; true projection/ranking feeds are still out of scope.
+- FAD-2026-07-08-003: External ChatGPT page may show its own sign-in/browser console warnings; the local app does not control that surface.
 
 ## Verification And Deployment State
 
-- Static syntax checks: `node --check app.js` passed.
-- Browser testing: Passed in local in-app browser at `http://localhost:8081/`.
+- Static syntax checks: `node --check app.js`, `node --check js/contextLock.js`, and `node --check js/chatgpt.js` passed.
+- Module verification: Passed Node VM test for Draft Context Lock, prompt generation, copy transport, and ChatGPT URL transport.
+- Browser testing: Passed in local in-app browser at `http://localhost:8082/`.
 - Safari compatibility verification: Passed basic Safari load/title verification in previous pass; this pass used in-app browser functional verification.
 - JSON export/import verification: Passed direct Node verification of My Team, labels, tiers, team defenses, max bids, and roster state.
 - Sleeper import verification: Passed with 612 core players and 1,157 cleaned players with deep pool enabled.
@@ -81,6 +95,7 @@ Last updated by Pass: FAD-2026-07-08-002
 - Draft/undo verification: Passed with My Team budget, max bid, roster counter update, selected-player state, and undo restoration.
 - Autosave verification: Passed by restoring edited tier, label, value, and notes after browser reload.
 - Prompt helper verification: Passed bid prompt generation and copy action without API calls.
+- Draft Assistant verification: Passed prompt preview, clipboard copy, ChatGPT open, collapse/expand, and draft-action context refresh.
 - Responsive verification: Passed at iPad Pro 12.9 landscape `1366x1024` with no horizontal overflow.
 - Xcode build: Intentionally not run; this repository has no Xcode project or native app target.
 - iPhone deployment: Not applicable; static web app.

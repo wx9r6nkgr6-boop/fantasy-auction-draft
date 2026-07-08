@@ -42,11 +42,16 @@ let filteredCacheKey = "";
 let filteredCache = [];
 let saveTimer = 0;
 let filterTimer = 0;
+let contextLock = null;
+let promptEngine = null;
+let assistantCollapsed = false;
 
 document.addEventListener("DOMContentLoaded", init);
 
 function init() {
   bindElements();
+  contextLock = window.DraftContextLock.createDraftContextLock();
+  promptEngine = window.ChatGPTPromptEngine.createPromptEngine({ contextLock });
   loadState();
   ensureSettings();
   bindEvents();
@@ -65,7 +70,8 @@ function bindElements() {
     "draftedCount", "autosaveStatus", "myTeamSelect", "myTeamSummary", "selectedName", "selectedMeta",
     "selectedFlags", "selectedScarcity", "draftTeam", "draftBudgetHint", "draftPrice", "draftBtn", "undoBtn",
     "targetToggle", "sleeperToggle", "avoidToggle", "tierInput", "customValueInput", "notesInput",
-    "copyResearchPromptBtn", "copyBidPromptBtn", "copyNominationPromptBtn", "promptOutput", "searchInput",
+    "draftAssistantPanel", "toggleAssistantBtn", "assistantBody", "assistantSummary", "promptTypeSelect",
+    "previewPromptBtn", "copyPromptBtn", "openChatGPTBtn", "assistantToast", "promptOutput", "searchInput",
     "positionFilter", "tierFilter", "labelFilter", "sortFilter", "showDeepPoolToggle", "clearFiltersBtn",
     "messages", "playerList", "addTeamBtn", "leagueBudgetInput", "teamsList"
   ].forEach((id) => {
@@ -85,9 +91,13 @@ function bindEvents() {
   ui.clearFiltersBtn.addEventListener("click", clearFilters);
   ui.draftTeam.addEventListener("change", () => {
     renderDraftBudgetHint();
+    renderDraftAssistant();
     scheduleSave();
   });
-  ui.draftPrice.addEventListener("input", renderDraftBudgetHint);
+  ui.draftPrice.addEventListener("input", () => {
+    renderDraftBudgetHint();
+    renderDraftAssistant();
+  });
   ui.myTeamSelect.addEventListener("change", () => {
     state.settings.myTeamId = ui.myTeamSelect.value;
     renderAll();
@@ -120,9 +130,11 @@ function bindEvents() {
     ui[id].addEventListener("change", updateSelectedPrep);
   });
 
-  ui.copyResearchPromptBtn.addEventListener("click", () => copyPrompt("research"));
-  ui.copyBidPromptBtn.addEventListener("click", () => copyPrompt("bid"));
-  ui.copyNominationPromptBtn.addEventListener("click", () => copyPrompt("nomination"));
+  ui.toggleAssistantBtn.addEventListener("click", toggleDraftAssistant);
+  ui.promptTypeSelect.addEventListener("change", previewPrompt);
+  ui.previewPromptBtn.addEventListener("click", previewPrompt);
+  ui.copyPromptBtn.addEventListener("click", copySelectedPrompt);
+  ui.openChatGPTBtn.addEventListener("click", openSelectedPromptInChatGPT);
 }
 
 function defaultSettings() {
@@ -490,7 +502,7 @@ function renderAll() {
   renderSelectedPlayer();
   renderPlayers();
   renderTeams();
-  renderPrompt();
+  renderDraftAssistant();
 }
 
 function syncControlValues() {
@@ -591,7 +603,7 @@ function renderSelectedPlayer() {
     ui.selectedMeta.textContent = "Pick a player to draft, label, or research.";
     ui.selectedFlags.innerHTML = "";
     ui.selectedScarcity.innerHTML = "";
-    renderPrompt();
+    renderDraftAssistant();
     return;
   }
   ui.selectedName.textContent = player.name;
@@ -606,7 +618,7 @@ function renderSelectedPlayer() {
   badgeList(player, prep, drafted).forEach((badge) => ui.selectedFlags.appendChild(badge));
   ui.selectedScarcity.innerHTML = selectedScarcityHtml(player);
   renderDraftBudgetHint();
-  renderPrompt();
+  renderDraftAssistant();
 }
 
 function setPrepDisabled(disabled) {
@@ -746,6 +758,7 @@ function updateSelectedPrep() {
   renderSelectedPlayer();
   renderPlayers();
   renderMyTeamSummary();
+  renderDraftAssistant();
   scheduleSave();
 }
 
@@ -761,6 +774,7 @@ function setPlayerLabel(playerId, label) {
   invalidateFilters();
   renderSelectedPlayer();
   renderPlayers();
+  renderDraftAssistant();
   scheduleSave();
 }
 
@@ -1013,69 +1027,170 @@ function clearFilters() {
   renderStatus();
 }
 
-function renderPrompt(type = "bid") {
-  if (!ui.promptOutput) return;
-  ui.promptOutput.value = buildPrompt(type);
+function refreshDraftContextLock() {
+  return contextLock.update(buildContextLockInput());
 }
 
-function copyPrompt(type) {
-  const prompt = buildPrompt(type);
-  ui.promptOutput.value = prompt;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(prompt).then(() => showMessage("Prompt copied.")).catch(() => fallbackCopy(prompt));
-  } else {
-    fallbackCopy(prompt);
-  }
-}
-
-function fallbackCopy(prompt) {
-  ui.promptOutput.focus();
-  ui.promptOutput.select();
-  document.execCommand("copy");
-  showMessage("Prompt copied.");
-}
-
-function buildPrompt(type) {
-  const context = promptContext();
-  if (type === "research") {
-    return `Research ${context.playerLine}. Given my ${context.leagueLine}, my roster is ${context.rosterLine}, budget is $${context.budget}, max bid is $${context.maxBid}, and open needs are ${context.needsLine}. Summarize current news, injury risk, role security, upside, and downside. Compare to similar remaining players: ${context.similarLine}.`;
-  }
-  if (type === "nomination") {
-    return `Given my ${context.leagueLine}, roster ${context.rosterLine}, budget $${context.budget}, max bid $${context.maxBid}, and open needs ${context.needsLine}, suggest my next nomination strategy. Consider other teams' needs (${context.otherNeedsLine}), tier scarcity (${context.scarcityLine}), and whether I should nominate a target, a price-enforcer, or a position I do not need.`;
-  }
-  return `Given my ${context.leagueLine}, my roster is ${context.rosterLine}, my budget is $${context.budget}, my max bid is $${context.maxBid}, should I bid on ${context.playerLine} up to $X? Consider current news, injury risk, tier scarcity (${context.scarcityLine}), similar players remaining (${context.similarLine}), other teams' needs (${context.otherNeedsLine}), and roster construction.`;
-}
-
-function promptContext() {
-  const player = state.players[state.selectedPlayerId];
-  const prep = getPrep(state.selectedPlayerId);
+function buildContextLockInput() {
   const infos = teamInfoMap();
+  const selected = state.players[state.selectedPlayerId];
+  const selectedPrep = getPrep(state.selectedPlayerId);
   const myInfo = infos[state.settings.myTeamId];
-  const myPicks = state.drafted.filter((pick) => pick.teamId === state.settings.myTeamId).map((pick) => `${state.players[pick.playerId]?.name || "Unknown"} $${pick.price}`);
-  const similar = player ? availablePlayers()
-    .filter((candidate) => candidate.id !== player.id && candidate.position === player.position && effectiveTier(candidate, getPrep(candidate.id)) === effectiveTier(player, prep))
-    .slice(0, 6)
-    .map((candidate) => `${candidate.name} (${candidate.positionRankLabel})`) : [];
-  const warnings = player ? scarcityWarnings(player) : scarcityWarnings();
+  const currentScarcity = selected ? scarcityForPosition(selected.position, selected) : null;
+  const players = state.playerOrder.map((id) => {
+    const player = state.players[id];
+    const prep = getPrep(id);
+    const pick = findDraftPick(id);
+    return {
+      id,
+      name: player.name,
+      team: player.team,
+      position: player.position,
+      tier: effectiveTier(player, prep),
+      overallRank: player.overallRank,
+      positionRank: player.positionRankLabel,
+      positionRankLabel: player.positionRankLabel,
+      label: prep.label,
+      notes: prep.notes,
+      customValue: prep.customValue,
+      available: !pick && (state.settings.showDeepPool || player.core),
+      drafted: Boolean(pick),
+      price: pick?.price || 0
+    };
+  });
   return {
-    leagueLine: `${state.teams.length}-team 2QB full PPR auction draft`,
-    playerLine: player ? `${player.name} (${player.positionRankLabel}, Tier ${effectiveTier(player, prep)}, ${player.team})` : "the selected player",
-    rosterLine: myPicks.length ? myPicks.join(", ") : "empty",
-    budget: myInfo?.budgetRemaining ?? state.settings.budget,
-    maxBid: myInfo?.maxBid ?? state.settings.budget,
-    needsLine: myInfo ? rosterNeedText(myInfo.roster).join(", ") || "none" : "unknown",
-    similarLine: similar.length ? similar.join(", ") : "none in this tier",
-    otherNeedsLine: otherNeedsSummary(),
-    scarcityLine: warnings.map((warning) => warning.text).join(" | ") || "no urgent scarcity warnings"
+    leagueFormat: `${state.teams.length}-team 2QB full PPR auction draft`,
+    budget: state.settings.budget,
+    rosterLimits: ROSTER_LIMITS,
+    teams: state.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      roster: infos[team.id]?.roster || {},
+      budgetRemaining: infos[team.id]?.budgetRemaining || 0,
+      maxBid: infos[team.id]?.maxBid || 0
+    })),
+    myTeam: state.teams.find((team) => team.id === state.settings.myTeamId),
+    myTeamInfo: myInfo,
+    myRoster: state.drafted.filter((pick) => pick.teamId === state.settings.myTeamId).map((pick) => ({
+      name: state.players[pick.playerId]?.name || "Unknown",
+      position: state.players[pick.playerId]?.position || "",
+      price: Number(pick.price || 0)
+    })),
+    players,
+    drafted: state.drafted,
+    currentPlayer: selected ? {
+      id: selected.id,
+      name: selected.name,
+      team: selected.team,
+      position: selected.position,
+      tier: effectiveTier(selected, selectedPrep),
+      overallRank: selected.overallRank,
+      positionRank: selected.positionRankLabel,
+      positionRankLabel: selected.positionRankLabel,
+      label: selectedPrep.label,
+      notes: selectedPrep.notes,
+      customValue: selectedPrep.customValue
+    } : null,
+    currentBid: Number(ui.draftPrice?.value || 0),
+    currentScarcity,
+    positionalScarcity: scarcityWarnings(),
+    auctionInflation: "Placeholder: auction inflation is not implemented yet."
   };
 }
 
-function otherNeedsSummary() {
-  const infos = teamInfoMap();
-  return ["QB", "RB", "WR", "TE", "DEF"].map((position) => {
-    const count = state.teams.filter((team) => team.id !== state.settings.myTeamId && needsPosition(infos[team.id].roster, position)).length;
-    return `${position}: ${count}`;
-  }).join(", ");
+function renderDraftAssistant() {
+  if (!ui.assistantSummary || !contextLock) return;
+  const snapshot = refreshDraftContextLock();
+  const myTeam = snapshot.myTeam;
+  const player = snapshot.currentPlayer;
+  ui.draftAssistantPanel.classList.toggle("collapsed", assistantCollapsed);
+  ui.assistantBody.hidden = assistantCollapsed;
+  ui.toggleAssistantBtn.textContent = assistantCollapsed ? "Expand" : "Collapse";
+  ui.toggleAssistantBtn.setAttribute("aria-expanded", String(!assistantCollapsed));
+  ui.assistantSummary.innerHTML = `
+    <div class="assistant-grid">
+      ${assistantMetric("My Team", myTeam?.name || "Unset")}
+      ${assistantMetric("Budget", `$${myTeam?.budgetRemaining ?? 0}`)}
+      ${assistantMetric("Max bid", `$${myTeam?.maxBid ?? 0}`)}
+      ${assistantMetric("Draft #", snapshot.draft.currentDraftNumber)}
+      ${assistantMetric("Bench open", myTeam?.benchSpotsRemaining ?? 0)}
+      ${assistantMetric("Inflation", "Placeholder")}
+    </div>
+    <div class="assistant-block"><strong>Roster</strong><span>${escapeHtml(myTeam?.roster?.map((item) => `${item.name} $${item.price}`).join(", ") || "Empty")}</span></div>
+    <div class="assistant-block"><strong>Starting needs</strong><span>${escapeHtml(myTeam?.openStartingPositions?.join(", ") || "None")}</span></div>
+    <div class="assistant-block"><strong>Current player</strong><span>${escapeHtml(player ? `${player.name} - ${player.positionRank} - Overall #${player.overallRank} - Tier ${player.tier}` : "None selected")}</span></div>
+    <div class="assistant-grid compact">
+      ${assistantMetric("Same tier left", player?.sameTierRemaining ?? 0)}
+      ${assistantMetric("Teams need pos", player?.teamsNeedingPosition ?? 0)}
+      ${assistantMetric("Current bid", `$${player?.currentBid ?? Number(ui.draftPrice?.value || 0)}`)}
+      ${assistantMetric("Position", player?.position || "-")}
+    </div>
+  `;
+  updatePromptPreview(false);
+}
+
+function assistantMetric(label, value) {
+  return `<div class="assistant-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function toggleDraftAssistant() {
+  assistantCollapsed = !assistantCollapsed;
+  renderDraftAssistant();
+}
+
+function previewPrompt() {
+  updatePromptPreview(true);
+}
+
+function updatePromptPreview(showToast) {
+  const type = ui.promptTypeSelect.value || "bid";
+  ui.promptOutput.value = promptEngine.buildPrompt(type, promptAdditions());
+  if (showToast) showAssistantToast("Prompt preview updated.");
+}
+
+async function copySelectedPrompt() {
+  const type = ui.promptTypeSelect.value || "bid";
+  const prompt = await promptEngine.copyPrompt(type, promptAdditions());
+  ui.promptOutput.value = prompt;
+  showAssistantToast("Prompt copied. Paste into ChatGPT.");
+  showMessage("Prompt copied. Paste into ChatGPT.");
+}
+
+async function openSelectedPromptInChatGPT() {
+  const type = ui.promptTypeSelect.value || "bid";
+  const prompt = await promptEngine.openChatGPT(type, promptAdditions());
+  ui.promptOutput.value = prompt;
+  showAssistantToast("Prompt copied. Paste into ChatGPT.");
+  showMessage("Prompt copied. Paste into ChatGPT.");
+}
+
+function promptAdditions() {
+  const selected = state.players[state.selectedPlayerId];
+  const prep = getPrep(state.selectedPlayerId);
+  const info = teamInfoMap()[state.settings.myTeamId];
+  return {
+    currentBid: Number(ui.draftPrice?.value || 0),
+    suggestedMaxBid: info?.maxBid || 0,
+    player: selected ? {
+      name: selected.name,
+      team: selected.team,
+      position: selected.position,
+      tier: effectiveTier(selected, prep),
+      positionRank: selected.positionRankLabel,
+      overallRank: selected.overallRank,
+      currentBid: Number(ui.draftPrice?.value || 0),
+      suggestedMaxBid: info?.maxBid || 0
+    } : null
+  };
+}
+
+function showAssistantToast(message) {
+  ui.assistantToast.textContent = message;
+  ui.assistantToast.classList.add("visible");
+  window.clearTimeout(ui.assistantToast._timer);
+  ui.assistantToast._timer = window.setTimeout(() => {
+    ui.assistantToast.classList.remove("visible");
+  }, 2600);
 }
 
 function exportState() {

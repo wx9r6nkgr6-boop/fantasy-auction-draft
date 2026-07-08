@@ -56,3 +56,22 @@ Use Sleeper player data as the seed source, then produce local fallback ranks fr
 ### Consequences
 
 The app remains static, fast, and Pages-ready. Rankings are transparent but not authoritative; users should treat them as a draft-board starting point and use the prompt helper for live external research.
+
+## ADR-FAD-0004: Draft Context Lock And Transport-Free Prompt Engine
+
+- Status: Accepted
+- Date: 2026-07-08
+- Pass ID: FAD-2026-07-08-003
+- Tags: `draft-assistant`, `context-lock`, `chatgpt-helper`
+
+### Context
+
+The draft assistant needs to generate reliable ChatGPT prompts from live draft state without a backend, OpenAI API calls, exposed API keys, or duplicated context logic in each prompt builder.
+
+### Decision
+
+Introduce `js/contextLock.js` as the standalone source of truth for concise draft snapshots and `js/chatgpt.js` as an independent prompt engine. The UI updates the context lock after meaningful draft actions, and prompt builders consume only the locked snapshot plus the specific player/decision being evaluated. Opening ChatGPT uses a local clipboard copy plus `https://chatgpt.com/`.
+
+### Consequences
+
+The app remains a static GitHub Pages app and future API or automation integrations can replace only the transport layer while keeping the context and prompt builders intact.
