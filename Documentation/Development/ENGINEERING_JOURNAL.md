@@ -583,3 +583,268 @@ Added a persistent collapsible Draft Assistant panel inside the live draft contr
 ### Deployment
 
 GitHub Pages compatibility is preserved because the app remains a static root `index.html` with local `styles.css`, `app.js`, and `js/` scripts.
+
+---
+
+## Pass FAD-2026-07-08-004
+
+- Date: 2026-07-08
+- Pass Type: Feature
+- Epic ID: E-FAD-UI-DATA-CORRECTION
+- Branch: main
+- Commit Reference: Uncommitted; base `c1160cada4cb16634c6026eeda923a4833288c43`
+- Architecture Tags: `static-web-app`, `sleeper-import`, `draft-state`, `player-prep`, `live-auction-ui`, `my-team`, `fallback-rankings`, `budget-max-bid`, `auction-values`, `draft-board`, `draft-assistant`, `context-lock`, `github-pages`
+
+### User Prompt
+
+"Reasoning level: High
+
+Repo: wx9r6nkgr6-boop/fantasy-auction-draft
+
+Build a focused UI/data correction pass.
+
+Primary goals:
+- Fix player ranking logic.
+- Add position-based player card colors.
+- Add auction value display.
+- Make tier editing clear and usable.
+- Add Team Rosters and Draft Board tabs.
+- Add nominating team tracking.
+- Temporarily remove/push down the pinned My Team card so player card information is higher on screen.
+
+====================================================
+1. PLAYER CARD COLORS BY POSITION
+====================================================
+
+Add distinct, tasteful position color treatment for player cards.
+
+Use position-based styling for:
+- QB
+- RB
+- WR
+- TE
+- DEF/DST
+
+Do not make the cards neon or unreadable.
+
+Player cards should still be easy to scan on iPad.
+
+At minimum:
+- colored left border or accent strip
+- subtle card background tint
+- position badge color
+
+====================================================
+2. FIX RANKINGS
+====================================================
+
+Current overall rankings appear random.
+
+Fix ranking logic so the default order is useful and value-oriented.
+
+Important:
+- Sleeper does not provide true fantasy rankings or auction values.
+- Do not pretend Sleeper rankings are authoritative.
+
+Implement a simple deterministic fallback ranking model until imported rankings exist.
+
+Suggested fallback:
+- Rank by position and likely fantasy relevance.
+- Prioritize active NFL players.
+- Prioritize known fantasy positions: QB, RB, WR, TE, DEF.
+- Reduce or remove irrelevant/deep players.
+- Apply rough 2QB full-PPR auction-friendly positional weighting.
+- Trending players may receive a small boost, but should not dominate rankings.
+- DEF/DST should be ranked after offensive starters unless filtered.
+- Rankings must be stable and reproducible, not random.
+
+Also show:
+- Overall rank
+- Position rank, e.g. QB1, RB12, WR24, TE7, DEF3
+
+If auction values are added, sort primarily by auction value descending, then overall rank.
+
+====================================================
+3. ESTIMATED AUCTION VALUES
+====================================================
+
+Add estimated auction values to player cards.
+
+Because Sleeper does not provide auction values, generate placeholder/fallback estimated values from the app’s ranking model.
+
+Rules:
+- Values should be clearly labeled as estimates.
+- Values should be editable by the user.
+- Persist edited values in localStorage and JSON import/export.
+- Use a 10-team, $200, 2QB, full-PPR redraft model as the default.
+- Higher-ranked players should generally have higher values.
+- Super-low/deep players should be $1.
+- Make values deterministic and explainable.
+
+Show on player cards:
+- Estimated value, e.g. “Est. $31”
+- User-edited custom value if present, e.g. “My $36”
+
+Do not overcomplicate the value model yet.
+
+====================================================
+4. TIER EDITING
+====================================================
+
+Make it obvious how to adjust tiers.
+
+Add one of these UX options:
+- inline tier dropdown on each selected player/card, OR
+- player detail panel with tier selector, OR
+- quick edit button that opens tier/value/labels/notes
+
+Required:
+- User can edit tier.
+- Tier edits persist in localStorage and JSON.
+- Player card clearly displays current tier.
+- Add short README note explaining how to adjust tiers.
+
+Auto-created tiers should remain editable.
+
+====================================================
+5. TEAM ROSTERS TAB
+====================================================
+
+Add a tab/navigation view for Team Rosters.
+
+This tab should show:
+- Every team
+- Full roster
+- Budget remaining
+- Max bid
+- Filled/open starter slots
+- Bench
+- IR if used
+
+Make it easy to scan all teams during the draft.
+
+====================================================
+6. DRAFT BOARD TAB
+====================================================
+
+Add a Draft Board tab.
+
+This tab should show draft results by pick/order.
+
+Include:
+- Pick number
+- Nominating team
+- Winning team
+- Player
+- Position
+- Tier
+- Auction value
+- Sold price
+- Price vs estimated value
+
+Add filters/sorting if simple:
+- by position
+- by team
+- by price
+
+====================================================
+7. NOMINATING TEAM
+====================================================
+
+Current app lets user select who wins the player.
+
+Add a separate “Nominated by” field to the auction entry form.
+
+Flow should be:
+1. Select player.
+2. Select/enter nominating team.
+3. Select winning team.
+4. Enter sold price.
+5. Confirm sold.
+
+Persist nominating team in draft history, JSON export/import, Team Rosters tab, and Draft Board tab.
+
+====================================================
+8. REMOVE/PUSH DOWN PINNED MY TEAM CARD FOR NOW
+====================================================
+
+Temporarily remove the pinned My Team card/summary from the main live draft screen.
+
+Reason:
+- It is taking too much vertical space.
+- Player card information needs to move higher on screen.
+
+Keep the underlying My Team designation data if already implemented, but do not show a large pinned My Team card on the main screen for now.
+
+It can remain visually highlighted in team lists if that does not consume extra space.
+
+====================================================
+9. RESPONSIVE/IPAD UX
+====================================================
+
+Keep optimized for iPad Pro 12.9 landscape.
+
+The live draft screen should prioritize:
+- Player list/card info
+- Auction entry form
+- Team budget/max bid visibility
+- Fast search/filtering
+
+Avoid adding clutter that slows down draft entry.
+
+====================================================
+10. TESTING / REPORTING
+====================================================
+
+Test:
+- Sleeper import
+- Ranking generation
+- Position colors
+- Tier editing persistence
+- Auction value editing persistence
+- Nominating team draft flow
+- Team Rosters tab
+- Draft Board tab
+- JSON export/import with new fields
+- localStorage autosave
+- GitHub Pages compatibility
+
+Run JS syntax checks.
+
+Commit and push.
+
+Report:
+- Files changed
+- Commit hash
+- Push status"
+
+### Implementation
+
+Added a deterministic value-oriented fallback ranking pass with fantasy anchor ordering, position-aware 2QB full-PPR auction value curves, stable tie-breaks, and explicit estimated auction value display. Added position-tinted player cards and badges for QB, RB, WR, TE, and DEF. Kept Sleeper as player metadata input and continued to avoid claiming Sleeper provides true rankings or auction values.
+
+Added editable custom auction value display and search text integration. Tier editing remains in the selected-player prep panel and is now documented in README alongside custom value behavior. Removed the large pinned My Team summary from the live screen while keeping My Team selectable and highlighted in team lists.
+
+Added Team Rosters and Draft Board tabs. Team Rosters shows every manager, budget, max bid, roster counters, full roster, pick number, and nominating team. Draft Board shows pick order, nominating team, winning team, player, position, tier, auction value, sold price, and value delta, with simple filters/sorts by position, team, price, and value delta.
+
+Added `nominatedByTeamId`, `estimatedValue`, `customValue`, and `auctionValue` snapshots to draft history and JSON export/import normalization. Updated Draft Context Lock and ChatGPT prompt descriptions to include selected-player auction value context.
+
+### Verification
+
+- Build: `node --check app.js`, `node --check js/contextLock.js`, and `node --check js/chatgpt.js` passed.
+- Static server: `python3 -m http.server 8082` started successfully outside the sandbox; `curl -I http://127.0.0.1:8082/` returned `HTTP/1.0 200 OK`.
+- Module verification: Node VM harness passed deterministic ranking stability, IDP filtering, team-defense creation, position rank labels, estimated value generation, custom auction value override, nominating-team normalization, budget math, and JSON export payload checks.
+- Position color audit: Static source audit confirmed QB/RB/WR/TE/DEF card and badge classes.
+- Team Rosters/Draft Board audit: Static source audit confirmed tab markup, roster list, draft board table, nominating-team column, and board filters.
+- JSON export/import verification: Node VM harness passed new draft-history fields and payload serialization.
+- localStorage autosave: Not live-reloaded in browser during this pass because in-app browser localhost reload was blocked; exported payload serialization and persistence fields were verified in Node.
+- Sleeper import verification: Live endpoint verification was not completed. Sandbox DNS could not resolve `api.sleeper.app`, and the escalated endpoint check was rejected by the environment usage-limit gate. Sleeper-shaped normalization/ranking was exercised by the Node VM harness.
+- Browser testing: In-app browser reload of `http://127.0.0.1:8082/` was blocked by browser URL policy despite the static server running, so live tab interaction was not completed in this pass.
+- Safari compatibility verification: Not live-run in this pass. The app remains a static root HTML/CSS/global-script Pages app with no build step.
+- GitHub Pages compatibility: Preserved static root files and relative local script/style references.
+- Deployment to iPhone: Not applicable; static web app.
+- Deployment to iPad: Not applicable; static web app. CSS was optimized for iPad Pro landscape, but live viewport verification was blocked.
+- Deployment to Apple Watch: Not applicable; no Watch target.
+
+### Deployment
+
+GitHub Pages compatibility is preserved. The pass is ready to commit and push from `main`; Pages should rebuild from repository-root static files after push.

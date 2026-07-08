@@ -16,3 +16,5 @@ Controlled terms for engineering records.
 | `chatgpt-helper` | Local-only copyable prompt generation for external ChatGPT research without direct OpenAI API calls. |
 | `draft-assistant` | Persistent, collapsible live-draft assistant UI that displays locked draft context and prompt actions. |
 | `context-lock` | Reusable draft-state snapshot module used as the single source of truth for prompt generation and future AI integrations. |
+| `auction-values` | Deterministic local estimated auction values and user-edited custom auction values. |
+| `draft-board` | Team Rosters and Draft Board views for roster audits, nomination tracking, sale history, and price-vs-value review. |

@@ -75,3 +75,22 @@ Introduce `js/contextLock.js` as the standalone source of truth for concise draf
 ### Consequences
 
 The app remains a static GitHub Pages app and future API or automation integrations can replace only the transport layer while keeping the context and prompt builders intact.
+
+## ADR-FAD-0005: Deterministic Auction Values And Draft Audit Views
+
+- Status: Accepted
+- Date: 2026-07-08
+- Pass ID: FAD-2026-07-08-004
+- Tags: `fallback-rankings`, `auction-values`, `draft-board`, `draft-state`
+
+### Context
+
+Sleeper player data does not provide authoritative fantasy rankings or auction values, and the prior fallback ordering could look random during live draft use. The draft workflow also needed nomination context, roster audits, and sale history review without adding a backend or premium projection source.
+
+### Decision
+
+Use deterministic local fantasy anchors, active/team/depth metadata, light trending boosts, and position-aware 10-team $200 2QB full-PPR value curves to produce explainable fallback ranks and estimated auction values. Sort the default board by user custom value or estimated value, then by stable fallback rank. Store nominating team, tier, estimated value, custom value, and auction value snapshots on draft picks. Add Team Rosters and Draft Board views from local draft state.
+
+### Consequences
+
+The board is stable, scan-friendly, and useful without claiming Sleeper has official rankings. Values remain estimates and should be replaceable later by manual imports or a stronger projection/rank source. Draft history now supports richer audit and export/import behavior while staying GitHub Pages compatible.

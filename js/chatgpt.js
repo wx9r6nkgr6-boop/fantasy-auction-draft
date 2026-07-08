@@ -91,7 +91,8 @@
 
   function describePlayer(player) {
     if (!player) return "No player selected";
-    return `${player.name} (${player.position || ""}${player.positionRank ? ` ${player.positionRank}` : ""}, overall #${player.overallRank || "?"}, Tier ${player.tier || "?"}, ${player.team || "FA"})`;
+    const value = player.auctionValue || player.customValue || player.estimatedValue || "";
+    return `${player.name} (${player.position || ""}${player.positionRank ? ` ${player.positionRank}` : ""}, overall #${player.overallRank || "?"}, Tier ${player.tier || "?"}, ${player.team || "FA"}${value ? `, est. value $${value}` : ""})`;
   }
 
   function similarPlayers(snapshot, player) {

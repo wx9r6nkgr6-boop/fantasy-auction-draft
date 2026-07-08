@@ -13,6 +13,13 @@ const DRAFT_POSITIONS = new Set(["QB", "RB", "WR", "TE", "DEF"]);
 const ACTIVE_STATUSES = new Set(["Active", "Injured Reserve", "Physically Unable to Perform", "Non Football Injury", "Suspended"]);
 const CORE_LIMITS = { QB: 70, RB: 180, WR: 240, TE: 110, DEF: 32 };
 const DEEP_LIMITS = { QB: 115, RB: 330, WR: 460, TE: 220, DEF: 32 };
+const POSITION_VALUE_CURVES = {
+  QB: { max: 52, starterCut: 24, deepCut: 70, shape: 1.25 },
+  RB: { max: 58, starterCut: 62, deepCut: 180, shape: 1.32 },
+  WR: { max: 56, starterCut: 72, deepCut: 240, shape: 1.36 },
+  TE: { max: 34, starterCut: 18, deepCut: 110, shape: 1.42 },
+  DEF: { max: 5, starterCut: 12, deepCut: 32, shape: 1.2 }
+};
 const TEAM_DEFENSES = [
   ["ARI", "Arizona Cardinals"], ["ATL", "Atlanta Falcons"], ["BAL", "Baltimore Ravens"], ["BUF", "Buffalo Bills"],
   ["CAR", "Carolina Panthers"], ["CHI", "Chicago Bears"], ["CIN", "Cincinnati Bengals"], ["CLE", "Cleveland Browns"],
@@ -23,6 +30,7 @@ const TEAM_DEFENSES = [
   ["NYJ", "New York Jets"], ["PHI", "Philadelphia Eagles"], ["PIT", "Pittsburgh Steelers"], ["SEA", "Seattle Seahawks"],
   ["SF", "San Francisco 49ers"], ["TB", "Tampa Bay Buccaneers"], ["TEN", "Tennessee Titans"], ["WAS", "Washington Commanders"]
 ];
+const FANTASY_ANCHORS = buildFantasyAnchors();
 
 const state = {
   players: {},
@@ -68,11 +76,13 @@ function bindElements() {
   [
     "importSleeperBtn", "importTrendingBtn", "exportBtn", "importFile", "playerCount", "availableCount",
     "draftedCount", "autosaveStatus", "myTeamSelect", "myTeamSummary", "selectedName", "selectedMeta",
-    "selectedFlags", "selectedScarcity", "draftTeam", "draftBudgetHint", "draftPrice", "draftBtn", "undoBtn",
+    "selectedFlags", "selectedScarcity", "nominatingTeam", "draftTeam", "draftBudgetHint", "draftPrice", "draftBtn", "undoBtn",
     "targetToggle", "sleeperToggle", "avoidToggle", "tierInput", "customValueInput", "notesInput",
     "draftAssistantPanel", "toggleAssistantBtn", "assistantBody", "assistantSummary", "promptTypeSelect",
     "previewPromptBtn", "copyPromptBtn", "openChatGPTBtn", "assistantToast", "promptOutput", "searchInput",
     "positionFilter", "tierFilter", "labelFilter", "sortFilter", "showDeepPoolToggle", "clearFiltersBtn",
+    "liveDraftTab", "teamRostersTab", "draftBoardTab", "liveDraftView", "teamRostersView", "draftBoardView",
+    "boardPositionFilter", "boardTeamFilter", "boardSortFilter", "teamRostersList", "draftBoardList",
     "messages", "playerList", "addTeamBtn", "leagueBudgetInput", "teamsList"
   ].forEach((id) => {
     ui[id] = document.getElementById(id);
@@ -89,6 +99,7 @@ function bindEvents() {
   ui.undoBtn.addEventListener("click", undoLastDraft);
   ui.addTeamBtn.addEventListener("click", addTeam);
   ui.clearFiltersBtn.addEventListener("click", clearFilters);
+  ui.nominatingTeam.addEventListener("change", scheduleSave);
   ui.draftTeam.addEventListener("change", () => {
     renderDraftBudgetHint();
     renderDraftAssistant();
@@ -120,6 +131,13 @@ function bindEvents() {
     ui[id].addEventListener("input", scheduleFilterRender);
     ui[id].addEventListener("change", scheduleFilterRender);
   });
+  ["boardPositionFilter", "boardTeamFilter", "boardSortFilter"].forEach((id) => {
+    ui[id].addEventListener("input", renderDraftBoard);
+    ui[id].addEventListener("change", renderDraftBoard);
+  });
+  ["liveDraftTab", "teamRostersTab", "draftBoardTab"].forEach((id) => {
+    ui[id].addEventListener("click", () => setActiveView(ui[id].dataset.view));
+  });
 
   ["targetToggle", "sleeperToggle", "avoidToggle"].forEach((id) => {
     ui[id].addEventListener("click", () => setSelectedLabel(ui[id].dataset.label));
@@ -141,8 +159,26 @@ function defaultSettings() {
   return {
     myTeamId: "",
     budget: 200,
-    showDeepPool: false
+    showDeepPool: false,
+    activeView: "live"
   };
+}
+
+function buildFantasyAnchors() {
+  const byPosition = {
+    QB: ["Josh Allen", "Lamar Jackson", "Jalen Hurts", "Patrick Mahomes", "Joe Burrow", "Jayden Daniels", "C.J. Stroud", "Justin Herbert", "Kyler Murray", "Jordan Love", "Brock Purdy", "Dak Prescott", "Caleb Williams", "Tua Tagovailoa", "Trevor Lawrence", "Drake Maye", "Anthony Richardson", "Bo Nix", "Baker Mayfield", "Jared Goff", "Matthew Stafford", "Justin Fields", "J.J. McCarthy", "Michael Penix"],
+    RB: ["Bijan Robinson", "Jahmyr Gibbs", "Saquon Barkley", "Christian McCaffrey", "Breece Hall", "Jonathan Taylor", "De'Von Achane", "Derrick Henry", "Josh Jacobs", "Kyren Williams", "Ashton Jeanty", "Chase Brown", "James Cook", "Kenneth Walker", "Bucky Irving", "Alvin Kamara", "Chuba Hubbard", "Joe Mixon", "Omarion Hampton", "TreVeyon Henderson", "David Montgomery", "Aaron Jones", "D'Andre Swift", "Isiah Pacheco", "Tony Pollard", "Tyrone Tracy", "Rhamondre Stevenson", "Brian Robinson"],
+    WR: ["Ja'Marr Chase", "Justin Jefferson", "CeeDee Lamb", "Amon-Ra St. Brown", "Puka Nacua", "Nico Collins", "A.J. Brown", "Brian Thomas", "Malik Nabers", "Drake London", "Ladd McConkey", "Tee Higgins", "Marvin Harrison", "Mike Evans", "Tyreek Hill", "Garrett Wilson", "Davante Adams", "Jaxon Smith-Njigba", "Rashee Rice", "DK Metcalf", "Terry McLaurin", "Courtland Sutton", "DeVonta Smith", "DJ Moore", "George Pickens", "Zay Flowers", "Chris Olave", "Jaylen Waddle", "Jameson Williams", "Xavier Worthy", "Rome Odunze", "Jordan Addison"],
+    TE: ["Brock Bowers", "Trey McBride", "George Kittle", "Sam LaPorta", "Travis Kelce", "Mark Andrews", "T.J. Hockenson", "Evan Engram", "David Njoku", "Jake Ferguson", "Dallas Goedert", "Tucker Kraft", "Kyle Pitts", "Dalton Kincaid", "Pat Freiermuth", "Hunter Henry", "Zach Ertz", "Colston Loveland"],
+    DEF: TEAM_DEFENSES.map(([, name]) => `${name} DEF`)
+  };
+  const anchors = {};
+  Object.entries(byPosition).forEach(([position, names]) => {
+    names.forEach((name, index) => {
+      anchors[`${position}:${nameKey(name)}`] = index + 1;
+    });
+  });
+  return anchors;
 }
 
 function defaultTeams() {
@@ -158,6 +194,10 @@ function cryptoSafeId(fallback) {
     return window.crypto.randomUUID();
   }
   return `${fallback}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function nameKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function loadState() {
@@ -216,11 +256,13 @@ function mergeImportedState(payload, options = {}) {
   state.trending = payload.trending && typeof payload.trending === "object" ? payload.trending : {};
   state.players = normalizePlayers(payload.players || {});
   state.playerOrder = Array.isArray(payload.playerOrder) ? payload.playerOrder.filter((id) => state.players[id]) : Object.keys(state.players);
-  state.drafted = Array.isArray(payload.drafted) ? payload.drafted.filter((pick) => pick && state.players[pick.playerId]) : [];
+  const importedDrafted = payload.drafted || [];
+  state.drafted = [];
   state.lastSleeperRefresh = payload.lastSleeperRefresh || null;
   state.selectedPlayerId = state.playerOrder[0] || null;
   state.history = [];
   rerankPlayers();
+  state.drafted = normalizeDrafted(importedDrafted);
   invalidateFilters();
   if (!options.silent) {
     renderAll();
@@ -269,6 +311,7 @@ function normalizePlayer(raw) {
     positionRank: Number(raw.positionRank || 9999),
     positionRankLabel: raw.positionRankLabel || "",
     heuristicScore: Number(raw.heuristicScore || 9999),
+    estimatedValue: Number(raw.estimatedValue || 1),
     searchText: ""
   };
   clean.searchText = buildSearchText(clean, state.prep[id]);
@@ -294,6 +337,28 @@ function normalizePrep(prep) {
     };
   });
   return normalized;
+}
+
+function normalizeDrafted(drafted) {
+  if (!Array.isArray(drafted)) return [];
+  return drafted
+    .filter((pick) => pick && state.players[pick.playerId])
+    .map((pick) => {
+      const player = state.players[pick.playerId];
+      const prep = getPrep(pick.playerId);
+      return {
+        playerId: String(pick.playerId),
+        nominatedByTeamId: String(pick.nominatedByTeamId || pick.nominatorTeamId || pick.teamId || state.settings.myTeamId || ""),
+        teamId: String(pick.teamId || ""),
+        price: Number(pick.price || 0),
+        position: pick.position || player.position,
+        tier: String(pick.tier || effectiveTier(player, prep)),
+        estimatedValue: Number(pick.estimatedValue || player.estimatedValue || 1),
+        customValue: pick.customValue === "" || pick.customValue == null ? "" : Number(pick.customValue),
+        auctionValue: Number(pick.auctionValue || pick.customValue || pick.estimatedValue || player.estimatedValue || 1),
+        draftedAt: pick.draftedAt || new Date().toISOString()
+      };
+    });
 }
 
 function normalizeLabel(label) {
@@ -439,12 +504,13 @@ function rerankPlayers() {
       player.positionRankLabel = `${player.position}${index + 1}`;
       player.autoTier = String(autoTierFor(player.position, index + 1));
       player.core = player.positionRank <= CORE_LIMITS[player.position] && player.active && (player.position === "DEF" || player.team !== "FA");
+      player.estimatedValue = estimateAuctionValue(player);
       player.searchText = buildSearchText(player, state.prep[player.id]);
     });
   });
   state.playerOrder = players
     .filter((player) => player.positionRank <= DEEP_LIMITS[player.position])
-    .sort((a, b) => a.heuristicScore - b.heuristicScore || a.name.localeCompare(b.name))
+    .sort((a, b) => effectiveAuctionValue(b, getPrep(b.id)) - effectiveAuctionValue(a, getPrep(a.id)) || a.heuristicScore - b.heuristicScore || a.name.localeCompare(b.name))
     .map((player, index) => {
       player.overallRank = index + 1;
       player.searchText = buildSearchText(player, state.prep[player.id]);
@@ -454,14 +520,42 @@ function rerankPlayers() {
 }
 
 function fallbackScore(player) {
-  const positionOffset = { RB: 0, WR: 8, QB: 18, TE: 28, DEF: 45 }[player.position] || 80;
-  const searchComponent = Math.min(player.searchRank, 9999) / 80;
-  const depthComponent = Math.min(player.depthChartOrder, 99) * 2.2;
-  const agePenalty = player.age && (player.age < 21 || player.age > 32) ? 8 : 0;
+  const anchor = anchorRank(player);
+  const positionOffset = { RB: 0, WR: 5, QB: 8, TE: 22, DEF: 115 }[player.position] || 160;
+  const searchComponent = Math.min(player.searchRank, 9999) / 55;
+  const depthComponent = Math.min(player.depthChartOrder, 99) * 3.4;
+  const agePenalty = player.age && (player.age < 21 || player.age > 32) ? 10 : 0;
   const freeAgentPenalty = player.team === "FA" ? 45 : 0;
   const inactivePenalty = player.active ? 0 : 100;
-  const trendingBoost = state.trending[player.id] ? Math.max(0, 18 - state.trending[player.id].rank / 6) : 0;
-  return positionOffset + searchComponent + depthComponent + agePenalty + freeAgentPenalty + inactivePenalty - trendingBoost;
+  const trendingBoost = state.trending[player.id] ? Math.max(0, 9 - state.trending[player.id].rank / 12) : 0;
+  const anchorComponent = anchor ? anchor * 1.65 : 175;
+  const rookieUpside = player.yearsExp <= 1 && player.depthChartOrder <= 3 ? -6 : 0;
+  return positionOffset + anchorComponent + searchComponent + depthComponent + agePenalty + freeAgentPenalty + inactivePenalty + rookieUpside - trendingBoost;
+}
+
+function anchorRank(player) {
+  const keys = [
+    `${player.position}:${nameKey(player.name)}`,
+    `${player.position}:${nameKey(String(player.name || "").replace(/\s+DEF$/i, ""))}`,
+    `${player.position}:${nameKey(`${player.team} DEF`)}`
+  ];
+  return keys.map((key) => FANTASY_ANCHORS[key]).find(Boolean) || 0;
+}
+
+function estimateAuctionValue(player) {
+  const curve = POSITION_VALUE_CURVES[player.position] || { max: 12, starterCut: 40, deepCut: 100, shape: 1.4 };
+  const rank = Math.max(1, Number(player.positionRank || 999));
+  if (!player.active || player.team === "FA" || rank > curve.deepCut) return 1;
+  const remaining = Math.max(0, curve.starterCut - rank + 1);
+  const ratio = remaining / curve.starterCut;
+  if (ratio <= 0) return player.position === "DEF" ? 1 : Math.max(1, Math.round(4 - Math.min(3, (rank - curve.starterCut) / 28)));
+  return Math.max(1, Math.round(curve.max * Math.pow(ratio, curve.shape)));
+}
+
+function effectiveAuctionValue(player, prep) {
+  const custom = prep?.customValue;
+  const number = Number(custom);
+  return custom !== "" && custom != null && Number.isFinite(number) ? number : Number(player?.estimatedValue || 1);
 }
 
 function autoTierFor(position, rank) {
@@ -487,7 +581,9 @@ function buildSearchText(player, prep) {
     player.position,
     player.team,
     player.positionRankLabel,
+    `overall ${player.overallRank}`,
     `tier ${effectiveTier(player, prep)}`,
+    `est ${player.estimatedValue}`,
     prep?.label,
     prep?.notes,
     prep?.customValue
@@ -496,12 +592,15 @@ function buildSearchText(player, prep) {
 
 function renderAll() {
   syncControlValues();
+  renderViewTabs();
   renderStatus();
   renderDraftControls();
   renderMyTeamSummary();
   renderSelectedPlayer();
   renderPlayers();
   renderTeams();
+  renderTeamRosters();
+  renderDraftBoard();
   renderDraftAssistant();
 }
 
@@ -525,6 +624,29 @@ function syncTierFilterOptions() {
   ui.tierFilter.value = tiers.includes(current) ? current : "ALL";
 }
 
+function renderViewTabs() {
+  const activeView = state.settings.activeView || "live";
+  [
+    ["liveDraftTab", "liveDraftView", "live"],
+    ["teamRostersTab", "teamRostersView", "rosters"],
+    ["draftBoardTab", "draftBoardView", "board"]
+  ].forEach(([tabId, viewId, value]) => {
+    const isActive = activeView === value;
+    ui[tabId].classList.toggle("active", isActive);
+    ui[tabId].setAttribute("aria-selected", String(isActive));
+    ui[viewId].classList.toggle("active", isActive);
+    ui[viewId].hidden = !isActive;
+  });
+}
+
+function setActiveView(view) {
+  state.settings.activeView = ["live", "rosters", "board"].includes(view) ? view : "live";
+  renderViewTabs();
+  if (state.settings.activeView === "rosters") renderTeamRosters();
+  if (state.settings.activeView === "board") renderDraftBoard();
+  scheduleSave();
+}
+
 function tierSort(a, b) {
   return Number(a) - Number(b) || String(a).localeCompare(String(b));
 }
@@ -540,20 +662,30 @@ function renderStatus() {
 
 function renderDraftControls() {
   const previousDraftTeam = ui.draftTeam.value || state.settings.myTeamId;
+  const previousNominatingTeam = ui.nominatingTeam.value || state.settings.myTeamId;
+  const previousBoardTeam = ui.boardTeamFilter.value || "ALL";
   ui.draftTeam.innerHTML = "";
+  ui.nominatingTeam.innerHTML = "";
   ui.myTeamSelect.innerHTML = "";
+  ui.boardTeamFilter.innerHTML = '<option value="ALL">All</option>';
   state.teams.forEach((team) => {
     const draftOption = document.createElement("option");
     draftOption.value = team.id;
     draftOption.textContent = team.id === state.settings.myTeamId ? `${team.name} (My Team)` : team.name;
     ui.draftTeam.appendChild(draftOption);
+    const nominatingOption = draftOption.cloneNode(true);
+    ui.nominatingTeam.appendChild(nominatingOption);
     const myOption = document.createElement("option");
     myOption.value = team.id;
     myOption.textContent = team.name;
     ui.myTeamSelect.appendChild(myOption);
+    const boardOption = myOption.cloneNode(true);
+    ui.boardTeamFilter.appendChild(boardOption);
   });
   if (state.settings.myTeamId) ui.myTeamSelect.value = state.settings.myTeamId;
   ui.draftTeam.value = state.teams.some((team) => team.id === previousDraftTeam) ? previousDraftTeam : state.settings.myTeamId;
+  ui.nominatingTeam.value = state.teams.some((team) => team.id === previousNominatingTeam) ? previousNominatingTeam : state.settings.myTeamId;
+  ui.boardTeamFilter.value = previousBoardTeam === "ALL" || state.teams.some((team) => team.id === previousBoardTeam) ? previousBoardTeam : "ALL";
   ui.undoBtn.disabled = state.drafted.length === 0;
   renderDraftBudgetHint();
 }
@@ -574,6 +706,7 @@ function renderDraftBudgetHint() {
 }
 
 function renderMyTeamSummary() {
+  if (!ui.myTeamSummary) return;
   const info = teamInfoMap()[state.settings.myTeamId];
   if (!info) {
     ui.myTeamSummary.textContent = "Choose a manager to pin My Team.";
@@ -607,7 +740,7 @@ function renderSelectedPlayer() {
     return;
   }
   ui.selectedName.textContent = player.name;
-  ui.selectedMeta.textContent = `#${player.overallRank} - ${player.positionRankLabel} - ${player.position} - ${player.team}${drafted ? ` - Drafted by ${teamName(drafted.teamId)} for $${drafted.price}` : ""}`;
+  ui.selectedMeta.textContent = `#${player.overallRank} - ${player.positionRankLabel} - ${player.position} - ${player.team} - Est. $${player.estimatedValue}${prep.customValue !== "" ? ` - My $${prep.customValue}` : ""}${drafted ? ` - Drafted by ${teamName(drafted.teamId)} for $${drafted.price}` : ""}`;
   ui.tierInput.value = effectiveTier(player, prep);
   ui.customValueInput.value = prep.customValue;
   ui.notesInput.value = prep.notes;
@@ -634,13 +767,14 @@ function renderPlayers() {
     const drafted = findDraftPick(player.id);
     const card = ui.playerTemplate.content.firstElementChild.cloneNode(true);
     card.dataset.playerId = player.id;
+    card.classList.add(`pos-${player.position.toLowerCase()}`);
     card.classList.toggle("selected", player.id === state.selectedPlayerId);
     card.classList.toggle("drafted", Boolean(drafted));
     card.classList.toggle("avoid", prep.label === "avoid");
     card.querySelector(".overall-rank").textContent = `#${player.overallRank}`;
     card.querySelector(".position-rank").textContent = player.positionRankLabel;
     card.querySelector("h3").textContent = player.name;
-    card.querySelector(".player-meta").textContent = `${player.position} - ${player.team} - Tier ${effectiveTier(player, prep)}${drafted ? ` - ${teamName(drafted.teamId)} $${drafted.price}` : ""}`;
+    card.querySelector(".player-meta").textContent = `${player.position} - ${player.team} - Tier ${effectiveTier(player, prep)} - Est. $${player.estimatedValue}${prep.customValue !== "" ? ` - My $${prep.customValue}` : ""}${drafted ? ` - ${teamName(drafted.teamId)} $${drafted.price}` : ""}`;
     card.querySelector(".player-notes").textContent = prep.notes || scarcityShortText(player);
     card.querySelectorAll(".label-toggle").forEach((button) => {
       const label = button.dataset.label;
@@ -663,10 +797,11 @@ function renderPlayers() {
 
 function badgeList(player, prep, drafted) {
   const badges = [];
-  badges.push(makeBadge(player.positionRankLabel));
+  badges.push(makeBadge(player.positionRankLabel, `pos-${player.position.toLowerCase()}`));
   badges.push(makeBadge(`Tier ${effectiveTier(player, prep)}`, "good"));
+  badges.push(makeBadge(`Est. $${player.estimatedValue}`, "value"));
   if (prep.label) badges.push(makeBadge(labelName(prep.label), prep.label === "avoid" ? "bad" : "good"));
-  if (prep.customValue !== "") badges.push(makeBadge(`$${prep.customValue}`, "good"));
+  if (prep.customValue !== "") badges.push(makeBadge(`My $${prep.customValue}`, "good"));
   if (state.trending[player.id]) badges.push(makeBadge(`Trending #${state.trending[player.id].rank}`, "warn"));
   if (!player.core) badges.push(makeBadge("Deep", "muted"));
   if (drafted) badges.push(makeBadge("Drafted", "bad"));
@@ -711,6 +846,7 @@ function getFilteredPlayers() {
 
 function comparePlayers(a, b, sort, drafted) {
   if (drafted.has(a.id) !== drafted.has(b.id)) return drafted.has(a.id) ? 1 : -1;
+  if (sort === "value") return effectiveAuctionValue(b, getPrep(b.id)) - effectiveAuctionValue(a, getPrep(a.id)) || a.overallRank - b.overallRank;
   if (sort === "position") return a.position.localeCompare(b.position) || a.positionRank - b.positionRank;
   if (sort === "tier") return Number(effectiveTier(a, getPrep(a.id))) - Number(effectiveTier(b, getPrep(b.id))) || a.overallRank - b.overallRank;
   if (sort === "label") return labelWeight(getPrep(a.id).label) - labelWeight(getPrep(b.id).label) || a.overallRank - b.overallRank;
@@ -800,10 +936,18 @@ function draftSelectedPlayer() {
     showMessage(`${team.name} cannot bid $${price}; max bid is $${team.maxBid}.`, true);
     return;
   }
+  const prep = getPrep(player.id);
+  const auctionValue = effectiveAuctionValue(player, prep);
   const pick = {
     playerId: player.id,
+    nominatedByTeamId: ui.nominatingTeam.value || ui.draftTeam.value,
     teamId: ui.draftTeam.value,
     price,
+    position: player.position,
+    tier: effectiveTier(player, prep),
+    estimatedValue: Number(player.estimatedValue || 1),
+    customValue: prep.customValue === "" ? "" : Number(prep.customValue),
+    auctionValue,
     draftedAt: new Date().toISOString()
   };
   state.drafted.push(pick);
@@ -811,7 +955,7 @@ function draftSelectedPlayer() {
   invalidateFilters();
   renderAll();
   scheduleSave();
-  showMessage(`${player.name} drafted by ${teamName(pick.teamId)} for $${pick.price}.`);
+  showMessage(`${player.name} nominated by ${teamName(pick.nominatedByTeamId)} and sold to ${teamName(pick.teamId)} for $${pick.price}.`);
 }
 
 function undoLastDraft() {
@@ -859,6 +1003,9 @@ function renderTeams() {
       renderDraftControls();
       renderSelectedPlayer();
       renderMyTeamSummary();
+      renderTeamRosters();
+      renderDraftBoard();
+      renderDraftAssistant();
       scheduleSave();
     });
     const remove = document.createElement("button");
@@ -883,6 +1030,116 @@ function renderTeams() {
     fragment.appendChild(card);
   });
   ui.teamsList.replaceChildren(fragment);
+}
+
+function renderTeamRosters() {
+  if (!ui.teamRostersList) return;
+  const infos = teamInfoMap();
+  const fragment = document.createDocumentFragment();
+  state.teams.forEach((team) => {
+    const info = infos[team.id];
+    const picks = state.drafted
+      .map((pick, index) => ({ pick, index, player: state.players[pick.playerId] }))
+      .filter((item) => item.pick.teamId === team.id && item.player)
+      .sort((a, b) => positionSortWeight(a.player.position) - positionSortWeight(b.player.position) || a.player.positionRank - b.player.positionRank);
+    const card = document.createElement("article");
+    card.className = `roster-card${team.id === state.settings.myTeamId ? " my-team" : ""}`;
+    const needs = Object.entries(info.roster).map(([slot, count]) => {
+      const limit = ROSTER_LIMITS[slot];
+      return `<span class="${count >= limit ? "full" : "open"}">${escapeHtml(slot)} ${count}/${limit}</span>`;
+    }).join("");
+    const playersHtml = picks.length ? picks.map(({ pick, index, player }) => {
+      const tier = pick.tier || effectiveTier(player, getPrep(player.id));
+      return `<li><strong>${escapeHtml(player.name)}</strong><span>${escapeHtml(player.position)} · Tier ${escapeHtml(tier)} · $${Number(pick.price || 0)} · Pick ${index + 1}</span><small>Nom: ${escapeHtml(teamName(pick.nominatedByTeamId))}</small></li>`;
+    }).join("") : '<li class="empty-row">No players drafted yet.</li>';
+    card.innerHTML = `
+      <div class="roster-card-head">
+        <div>
+          <p class="eyebrow">${team.id === state.settings.myTeamId ? "My Team" : "Manager"}</p>
+          <h3>${escapeHtml(team.name)}</h3>
+        </div>
+        <div class="roster-money">
+          <span>Budget $${info.budgetRemaining}</span>
+          <strong>Max $${info.maxBid}</strong>
+        </div>
+      </div>
+      <div class="roster-needs">${needs}</div>
+      <ul class="roster-player-list">${playersHtml}</ul>
+    `;
+    fragment.appendChild(card);
+  });
+  ui.teamRostersList.replaceChildren(fragment);
+}
+
+function renderDraftBoard() {
+  if (!ui.draftBoardList) return;
+  const position = ui.boardPositionFilter?.value || "ALL";
+  const team = ui.boardTeamFilter?.value || "ALL";
+  const sort = ui.boardSortFilter?.value || "pick";
+  const rows = state.drafted
+    .map((pick, index) => ({ pick, index, player: state.players[pick.playerId] }))
+    .filter((row) => row.player)
+    .filter((row) => position === "ALL" || row.player.position === position)
+    .filter((row) => team === "ALL" || row.pick.teamId === team || row.pick.nominatedByTeamId === team)
+    .sort((a, b) => {
+      if (sort === "price") return Number(b.pick.price || 0) - Number(a.pick.price || 0) || a.index - b.index;
+      if (sort === "value") return valueDelta(b.pick) - valueDelta(a.pick) || a.index - b.index;
+      return a.index - b.index;
+    });
+  if (!rows.length) {
+    ui.draftBoardList.innerHTML = '<div class="empty-board">No drafted players match these filters yet.</div>';
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "draft-board-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Pick</th>
+        <th>Nominated by</th>
+        <th>Winning team</th>
+        <th>Player</th>
+        <th>Pos</th>
+        <th>Tier</th>
+        <th>Value</th>
+        <th>Sold</th>
+        <th>Vs Est.</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const body = table.querySelector("tbody");
+  rows.forEach(({ pick, index, player }) => {
+    const row = document.createElement("tr");
+    const tier = pick.tier || effectiveTier(player, getPrep(player.id));
+    const value = pickAuctionValue(pick, player);
+    const delta = valueDelta(pick, player);
+    row.innerHTML = `
+      <td>#${index + 1}</td>
+      <td>${escapeHtml(teamName(pick.nominatedByTeamId))}</td>
+      <td>${escapeHtml(teamName(pick.teamId))}</td>
+      <td><strong>${escapeHtml(player.name)}</strong></td>
+      <td><span class="badge pos-${player.position.toLowerCase()}">${escapeHtml(player.position)}</span></td>
+      <td>${escapeHtml(tier)}</td>
+      <td>$${value}</td>
+      <td>$${Number(pick.price || 0)}</td>
+      <td><span class="${delta >= 0 ? "value-good" : "value-bad"}">${delta >= 0 ? "+" : ""}${delta}</span></td>
+    `;
+    body.appendChild(row);
+  });
+  ui.draftBoardList.replaceChildren(table);
+}
+
+function positionSortWeight(position) {
+  return { QB: 1, RB: 2, WR: 3, TE: 4, FLEX: 5, DEF: 6, Bench: 7, IR: 8 }[position] || 99;
+}
+
+function pickAuctionValue(pick, player) {
+  return Number(pick.auctionValue || pick.customValue || pick.estimatedValue || player?.estimatedValue || 1);
+}
+
+function valueDelta(pick, player) {
+  return pickAuctionValue(pick, player) - Number(pick.price || 0);
 }
 
 function buildTeamRosters() {
@@ -1021,7 +1278,7 @@ function clearFilters() {
   ui.positionFilter.value = "ALL";
   ui.tierFilter.value = "ALL";
   ui.labelFilter.value = "ALL";
-  ui.sortFilter.value = "overall";
+  ui.sortFilter.value = "value";
   invalidateFilters();
   renderPlayers();
   renderStatus();
@@ -1053,6 +1310,8 @@ function buildContextLockInput() {
       label: prep.label,
       notes: prep.notes,
       customValue: prep.customValue,
+      estimatedValue: player.estimatedValue,
+      auctionValue: effectiveAuctionValue(player, prep),
       available: !pick && (state.settings.showDeepPool || player.core),
       drafted: Boolean(pick),
       price: pick?.price || 0
@@ -1089,7 +1348,9 @@ function buildContextLockInput() {
       positionRankLabel: selected.positionRankLabel,
       label: selectedPrep.label,
       notes: selectedPrep.notes,
-      customValue: selectedPrep.customValue
+      estimatedValue: selected.estimatedValue,
+      customValue: selectedPrep.customValue,
+      auctionValue: effectiveAuctionValue(selected, selectedPrep)
     } : null,
     currentBid: Number(ui.draftPrice?.value || 0),
     currentScarcity,
@@ -1178,6 +1439,9 @@ function promptAdditions() {
       tier: effectiveTier(selected, prep),
       positionRank: selected.positionRankLabel,
       overallRank: selected.overallRank,
+      estimatedValue: selected.estimatedValue,
+      customValue: prep.customValue,
+      auctionValue: effectiveAuctionValue(selected, prep),
       currentBid: Number(ui.draftPrice?.value || 0),
       suggestedMaxBid: info?.maxBid || 0
     } : null

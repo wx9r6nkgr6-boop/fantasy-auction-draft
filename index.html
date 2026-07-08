@@ -44,18 +44,6 @@
 
     <main class="workspace">
       <aside class="panel controls-panel" aria-label="Draft controls">
-        <section class="my-team-card">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Pinned team</p>
-              <h2>My Team</h2>
-            </div>
-          </div>
-          <label for="myTeamSelect">Manager</label>
-          <select id="myTeamSelect"></select>
-          <div id="myTeamSummary" class="my-team-summary"></div>
-        </section>
-
         <section class="selected-card">
           <p class="eyebrow">Selected player</p>
           <h2 id="selectedName">No player selected</h2>
@@ -65,12 +53,14 @@
         </section>
 
         <section class="draft-box">
-          <label for="draftTeam">Draft to team</label>
+          <label for="nominatingTeam">Nominated by</label>
+          <select id="nominatingTeam"></select>
+          <label for="draftTeam">Winning team</label>
           <select id="draftTeam"></select>
           <div id="draftBudgetHint" class="budget-hint"></div>
-          <label for="draftPrice">Auction price</label>
+          <label for="draftPrice">Sold price</label>
           <input id="draftPrice" type="number" min="0" inputmode="numeric" value="1">
-          <button id="draftBtn" class="primary" disabled>Draft Player</button>
+          <button id="draftBtn" class="primary" disabled>Confirm Sold</button>
           <button id="undoBtn">Undo Last Draft</button>
         </section>
 
@@ -82,7 +72,7 @@
           </div>
           <label for="tierInput">Tier</label>
           <input id="tierInput" type="text" placeholder="Auto unless edited">
-          <label for="customValueInput">Custom auction value</label>
+          <label for="customValueInput">My auction value</label>
           <input id="customValueInput" type="number" min="0" inputmode="numeric" placeholder="Example: 18">
           <label for="notesInput">Personal notes</label>
           <textarea id="notesInput" rows="4" placeholder="Targets, injury concerns, role notes..."></textarea>
@@ -117,57 +107,98 @@
       </aside>
 
       <section class="panel players-panel" aria-label="Player board">
-        <div class="filter-bar">
-          <label class="search-wrap">
-            <span>Search</span>
-            <input id="searchInput" type="search" placeholder="Name, team, notes, tier, label...">
-          </label>
-          <label>
-            <span>Position</span>
-            <select id="positionFilter">
-              <option value="ALL">All</option>
-              <option value="QB">QB</option>
-              <option value="RB">RB</option>
-              <option value="WR">WR</option>
-              <option value="TE">TE</option>
-              <option value="DEF">DEF</option>
-            </select>
-          </label>
-          <label>
-            <span>Tier</span>
-            <select id="tierFilter">
-              <option value="ALL">All</option>
-            </select>
-          </label>
-          <label>
-            <span>Label</span>
-            <select id="labelFilter">
-              <option value="ALL">All</option>
-              <option value="target">Target</option>
-              <option value="sleeper">Sleeper</option>
-              <option value="avoid">Avoid</option>
-              <option value="unlabeled">Unlabeled</option>
-            </select>
-          </label>
-          <label>
-            <span>Sort</span>
-            <select id="sortFilter">
-              <option value="overall">Overall rank</option>
-              <option value="position">Position rank</option>
-              <option value="tier">Tier</option>
-              <option value="label">Target/Sleeper/Avoid</option>
-              <option value="trending">Trending</option>
-              <option value="available">Available only</option>
-            </select>
-          </label>
-          <label class="toggle-control">
-            <input id="showDeepPoolToggle" type="checkbox">
-            <span>Show deep pool</span>
-          </label>
-          <button id="clearFiltersBtn">Clear</button>
+        <div class="view-tabs" role="tablist" aria-label="Draft views">
+          <button id="liveDraftTab" class="view-tab active" type="button" data-view="live">Live Draft</button>
+          <button id="teamRostersTab" class="view-tab" type="button" data-view="rosters">Team Rosters</button>
+          <button id="draftBoardTab" class="view-tab" type="button" data-view="board">Draft Board</button>
         </div>
-        <div id="messages" class="messages" aria-live="polite"></div>
-        <div id="playerList" class="player-list" tabindex="0"></div>
+        <section id="liveDraftView" class="draft-view active">
+          <div class="filter-bar">
+            <label class="search-wrap">
+              <span>Search</span>
+              <input id="searchInput" type="search" placeholder="Name, team, notes, tier, label...">
+            </label>
+            <label>
+              <span>Position</span>
+              <select id="positionFilter">
+                <option value="ALL">All</option>
+                <option value="QB">QB</option>
+                <option value="RB">RB</option>
+                <option value="WR">WR</option>
+                <option value="TE">TE</option>
+                <option value="DEF">DEF</option>
+              </select>
+            </label>
+            <label>
+              <span>Tier</span>
+              <select id="tierFilter">
+                <option value="ALL">All</option>
+              </select>
+            </label>
+            <label>
+              <span>Label</span>
+              <select id="labelFilter">
+                <option value="ALL">All</option>
+                <option value="target">Target</option>
+                <option value="sleeper">Sleeper</option>
+                <option value="avoid">Avoid</option>
+                <option value="unlabeled">Unlabeled</option>
+              </select>
+            </label>
+            <label>
+              <span>Sort</span>
+              <select id="sortFilter">
+                <option value="value">Auction value</option>
+                <option value="overall">Overall rank</option>
+                <option value="position">Position rank</option>
+                <option value="tier">Tier</option>
+                <option value="label">Target/Sleeper/Avoid</option>
+                <option value="trending">Trending</option>
+                <option value="available">Available only</option>
+              </select>
+            </label>
+            <label class="toggle-control">
+              <input id="showDeepPoolToggle" type="checkbox">
+              <span>Show deep pool</span>
+            </label>
+            <button id="clearFiltersBtn">Clear</button>
+          </div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+          <div id="playerList" class="player-list" tabindex="0"></div>
+        </section>
+        <section id="teamRostersView" class="draft-view" hidden>
+          <div id="teamRostersList" class="team-rosters-list"></div>
+        </section>
+        <section id="draftBoardView" class="draft-view" hidden>
+          <div class="board-filters">
+            <label>
+              <span>Position</span>
+              <select id="boardPositionFilter">
+                <option value="ALL">All</option>
+                <option value="QB">QB</option>
+                <option value="RB">RB</option>
+                <option value="WR">WR</option>
+                <option value="TE">TE</option>
+                <option value="DEF">DEF</option>
+              </select>
+            </label>
+            <label>
+              <span>Team</span>
+              <select id="boardTeamFilter">
+                <option value="ALL">All</option>
+              </select>
+            </label>
+            <label>
+              <span>Sort</span>
+              <select id="boardSortFilter">
+                <option value="pick">Pick order</option>
+                <option value="price">Price</option>
+                <option value="value">Value diff</option>
+              </select>
+            </label>
+          </div>
+          <div id="draftBoardList" class="draft-board-list"></div>
+        </section>
       </section>
 
       <aside class="panel teams-panel" aria-label="Teams and roster needs">
@@ -180,6 +211,8 @@
         </div>
         <label for="leagueBudgetInput">Team budget</label>
         <input id="leagueBudgetInput" type="number" min="1" inputmode="numeric" value="200">
+        <label for="myTeamSelect">My Team</label>
+        <select id="myTeamSelect"></select>
         <div id="teamsList" class="teams-list"></div>
       </aside>
     </main>
